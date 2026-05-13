@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "247764122338",
+    "project_id": "ar-ml-homeviz-ba4c4",
+    "storage_bucket": "ar-ml-homeviz-ba4c4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:247764122338:android:5d10476473ee3e5f9dbcbb",
+        "android_client_info": {
+          "package_name": "com.tharushi.upeksha.ar_homeviz"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "247764122338-vsismpv68klecma9018ak8rfe1i8g0vp.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tharushi.upeksha.ar_homeviz",
+            "certificate_hash": "9d6eedbf27d02208c5ceb1a1a43648976322c53c"
+          }
+        },
+        {
+          "client_id": "247764122338-9njmp4u4ohkip69s4rg4m6k7tdrhsfrf.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAx4153O0PmVjXfxv7k-fAEzX51syP9_ek"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "247764122338-9njmp4u4ohkip69s4rg4m6k7tdrhsfrf.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

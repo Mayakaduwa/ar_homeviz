@@ -1,0 +1,282 @@
+Horizon Campus
+Faculty of Information Technology
+BSc (Hons.) in Information Technology/BIT (Hons.) in Networking and
+Mobile Computing
+Please fully complete all sections as requested.
+Degree Program: BSc (Hons.) in Information Technology
+BIT (Hons.) in Networking and Mobile Computing
+Research Details
+Student Details / Group Name:
+Name with Initials
+
+Registration No
+
+Phone No
+
+J.M.V.Sandaru
+
+ITBNM-2211-0184
+
+0710427962
+
+M.T.Upeksha
+
+ITBIN-2211-0307
+
+0760484103
+
+Name with Initials
+
+Email
+
+Phone No
+
+A.C.B.Abeykoon
+
+anjana@horizoncampus.edu.lk
+
+0775770467
+
+Primary Supervisor
+
+Co-supervisor / Mentor (if any)
+Name with Initials
+
+Email
+
+Phone No
+
+N.T.Jayathilaka
+
+nadunij@horizoncampus.edu.lk
+
+0763396331
+
+Proposed Research Project Details:
+1. Working Title
+Augmented Reality–Based Interior Design Mobile Application for Wall & Floor Color
+Visualization with Personalized Color Palette Recommendation
+2. Problem Statement
+Interior design decisions, especially regarding wall and floor colors, are often challenging
+for homeowners and designers because colors look different in reality than in catalogues or
+design boards. Customers usually struggle to imagine how a selected color would appear in
+
+Undergraduate Research Proposal Form, Faculty of Information Technology [Version 10/06/2024]
+
+their actual space, leading to costly mistakes and dissatisfaction. Traditional 2D color
+samples do not provide realistic visualization, while hiring professional designers can be
+expensive. At the same time, color harmony and personalized design preferences are rarely
+addressed by existing tools. Therefore, there is a need for a mobile application that leverages
+Augmented Reality (AR) to allow real-time visualization of wall and floor colors, while
+also providing intelligent color palette recommendations based on user preferences. Such
+a solution would save time, reduce cost, and improve customer satisfaction by enabling datadriven and personalized design decisions.
+3. Research Aim
+To design and develop an Augmented Reality–based mobile application that enables
+real-time visualization of wall and floor colors and recommends personalized color palettes
+based on user preferences, enhancing decision-making in interior design.
+4. Research Objectives
+Objective 1: To implement an AR-based feature that allows users to visualize selected
+wall and floor colors in real-time using their smartphone camera.
+Objective 2: To design a color recommendation system that generates personalized color
+palettes based on user input and established design principles.
+5. Research Questions
+Question 1: How can AR technology be applied to accurately visualize wall and floor colors
+in real-world environments?
+Question 2: What methods can be used to generate personalized and aesthetically pleasing
+color palettes based on user input?
+Question 3: To what extent does the proposed app improve decision-making and satisfaction
+compared to traditional color selection methods?
+6. Background Literature Review
+Interior design applications have increasingly incorporated technology to improve
+visualization and decision-making. Augmented Reality (AR) has been widely studied for
+
+Undergraduate Research Proposal Form, Faculty of Information Technology [Version 10/06/2024]
+
+its ability to project virtual elements into physical spaces. Houzz and IKEA’s AR apps
+demonstrate how users can preview furniture and colors in real environments, though these
+are limited in personalization. Research by Emersya (IEEE Spectrum, 2022) highlights how
+AR enables consumers to customize products, reinforcing the need for similar solutions in
+interior design.
+Wall and floor color visualization remains a key challenge. According to Automatic Interior
+Design in AR Based on Procedural Rules (ResearchGate, 2021), AR can automatically adapt
+interior layouts, while Background-Aware Colorization in AR (ResearchGate, 2022)
+emphasizes the importance of harmonizing colors with environmental factors.
+Personalization in interior design has been explored in studies like Interactive Interior
+Design Recommendation via Multimodal Reinforcement Learning (ArXiv, 2023), which
+uses AI to align design with user feedback. Similarly, Aesthetic Preference Prediction Using
+Fuzzy Logic (ArXiv, 2024) demonstrates how computational models can predict human
+color preferences.
+Color harmonization is another focus area. Color Harmonization in AR Applications (MDPI,
+2021) discusses how visual balance impacts user experience, directly aligning with this
+project’s recommendation system.
+Despite these advances, most existing solutions treat visualization and recommendation as
+separate problems. Few combine AR visualization with intelligent personalization,
+leaving a gap for a system that both shows how colors look and recommends palettes tailored
+to user needs. This project fills that gap by integrating AR visualization with an AI-driven
+recommendation system, offering a comprehensive solution.
+Thus, the research builds upon existing AR visualization and AI-based recommendation
+systems but innovates by combining them into a unified, user-friendly mobile app for interior
+design.
+
+7. Data Requirement
+
+Undergraduate Research Proposal Form, Faculty of Information Technology [Version 10/06/2024]
+
+Primary Data
+1. User Surveys (Example: Google Forms or in-app questionnaire)
+○ Surveys can ask users about their favorite colors, preferred wall–floor
+combinations, lighting conditions at home, and overall design preferences.
+○ Why: This helps the recommendation system learn real user preferences
+instead of relying only on theory.
+2. User Testing of the Prototype (Example: Asking 10–15 users to try the app and
+give feedback)
+○ Users interact with the AR prototype, test wall and floor color visualization,
+and then rate usability, realism, and satisfaction.
+○ Why: This evaluates whether the app is user-friendly and if the
+recommendations feel practical and realistic.
+Secondary Data
+1. Existing Datasets on Color Theory and Palette Combinations (Example:
+Adobe Color CC database, COCO color dataset)
+○ These provide predefined harmonious color palettes (complementary,
+triadic, analogous, etc.).
+○ Why: The recommendation system can suggest scientifically proven color
+matches instead of random combinations.
+2. Published Research on AR Visualization Techniques (Example: IEEE papers
+on AR interior design)
+○ Previous studies give insights into best practices for AR rendering,
+environmental lighting effects, and realism in visualization.
+○ Why: Helps improve the accuracy and performance of the AR module.
+
+8. Hardware/ Software Requirements
+Hardware:
+Android smartphone with ARCore support
+
+Undergraduate Research Proposal Form, Faculty of Information Technology [Version 10/06/2024]
+
+Software:
+● Flutter SDK:
+Free and open source.
+● Android Studio for mobile app development.
+Free to download.
+● ARCore SDK for AR visualization.
+Free and officially supported by Google and Apple.
+● Python/ML libraries (TensorFlow, scikit-learn) for recommendation system.
+● Firebase for backend and data storage.
+Free tier available
+
+9. Ethics
+This project involves human participants for usability testing and surveys. Ethical
+considerations include:
+● Informed consent from participants.
+● Anonymity of collected data.
+● Ensuring no harm or discomfort during user testing.
+No animal, environmental, or political issues are involved.
+
+10. References
+1. R. S. P., H. A., and S. S., “Augmented Reality in Interior Design,” Journal of
+Innovative Image Processing, vol. 6, no. 3, pp. 305–313, Sep. 2024. DOI:
+10.36548/jiip.2024.3.007.Link
+2. IKEA, “Launch of new IKEA Place app,” IKEA Newsroom, Sep. 12, 2017. Describes
+ARKit-based AR visualization with 98% accuracy in scaling products and realistic
+light/shadow rendering.Link
+3. E. Gürçınar and Ö. C. Esen, “The Application of Augmented Reality in Interior
+Design Education,” in Proc. NordDesign (DS 91), Linköping, Sweden, Aug. 2018.
+
+Undergraduate Research Proposal Form, Faculty of Information Technology [Version 10/06/2024]
+
+Explores AR usability in interior design education, with user feedback collected via
+surveys.Link.
+4. U. Sridevi et al., “Integrating Augmented Reality and Machine Learning for
+Enhanced Interior and Exterior Design Visualization and Recommendation,” J.
+Propulsion Technology, vol. 45, no. 3, pp. 2415– , 2024. Presents AR + ML
+integration for real-time design previews and personalized suggestions.Link
+5. C. E. Mendoza-Ramírez et al., “Augmented Reality: Survey,” Appl. Sci., vol. 13,
+no. 18, 2023. Offers a systematic literature review of AR technologies, challenges,
+and trends across multiple domains.Link
+6. IKEA Kreativ, IKEA Newsroom, Jun. 22, 2022. Highlights IKEA’s AI-powered,
+spatial computing and mixed-reality tools for lifelike room design experiences.Link
+7. Houzz, Wikipedia, latest update. Describes Houzz's "View in My Room 3D" AR
+feature allowing users to place virtual products in real spaces using iOS and
+ARCore.Link
+8. Revathy et al. (2024): Demonstrates real-time AR visualization applied to interior
+furniture placement using web-based AR.
+9. Sridevi et al. (2024): Integrates AR and ML for immersive visualization and usertailored recommendations.
+
+11. Gantt Chart
+
+Undergraduate Research Proposal Form, Faculty of Information Technology [Version 10/06/2024]
+
+Students Agreement:
+By signing below on
+
+2025/07/06
+
+, I/We, as J.M.V.Sandaru , M.T.Upeksha
+
+,
+
+(name/s) agree to the commonly known and accepted research ethics and guidelines. I/We
+commit to conducting the research project as mentioned above and outlined in the
+agreement. I/We understand that any changes to the group composition, identified research
+problem, or selected supervisor may result in penalties.
+
+Name with Initials
+
+Registration No
+
+J.M.V.Sandaru
+
+ITBNM-2211-0184
+
+M.T.Upeksha
+
+ITBIN-2211-0307
+
+Signature
+
+Supervisor(s) Agreement:
+By signing below, I/We agree to supervise the aforementioned group of students throughout
+their research project, providing guidance and support for successful completion.
+Furthermore, by signing this document, I/we give my/our consent to the following:
+1.
+
+The identified research problem is justifiable and feasible for investigation.
+
+2.
+
+The research aim is achievable within a one-year timeframe.
+
+3.
+
+The specified research objectives are measurable and achievable within the research
+
+period.
+Supervisor’s Name with Initials
+
+Signature
+
+Date
+
+Mr.Anjana Abeykoon
+
+Departmental Use Only:
+Date Proposal Form Submitted:
+
+Undergraduate Research Proposal Form, Faculty of Information Technology [Version 10/06/2024]
+
+All required sections of the form have been accurately completed, and the necessary
+signatures have been placed. The initial research proposal has been partially approved,
+thereby allowing the proposed research project to proceed in accordance with the specified
+guidelines outlined in the IT41028.
+
+Research Coordinator’s Signature:
+
+Date:
+
+Department Head’s Signature:
+
+Date:
+
+Undergraduate Research Proposal Form, Faculty of Information Technology [Version 10/06/2024]
+
+
