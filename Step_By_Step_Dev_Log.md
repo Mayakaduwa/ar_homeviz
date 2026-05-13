@@ -84,4 +84,45 @@
 - Successfully integrated `google-services.json` into the `android/app/` directory.
 - Configured Firebase Console with Email/Password Authentication and Realtime Database.
 - Verified Package Name (`com.tharushi.upeksha.ar_homeviz`) and established SHA-1 security handshake.
-- Decision made to prioritize **Mobile Storage** over Cloud Storage for design snapshots to ensure privacy and offline accessibility.
+### 🔹 Step 18: Wall Segmentation Optimization (Performance)
+- **Problem:** UI thread crashes (OOM) due to drawing 66,000+ individual rectangles for the wall mask.
+- **Solution:** Re-engineered the `SegmentationPainter` to use **Horizontal Segment Rendering**.
+- **Result:** Reduced draw calls from thousands to ~300 per frame, stabilizing the app on budget devices (Samsung A06).
+
+### 🔹 Step 19: Robust Heuristic Segmentation (Fallback)
+- **Problem:** TFLite model incompatibility with custom `Convolution2DTransposeBias` operators on mobile.
+- **Solution:** Implemented a high-fidelity **LAB Color Space** detector using Delta-E perceptual distance.
+- **Result:** Created a reliable wall detection engine that works without TFLite, sampling upper room zones for color reference.
+
+### 🔹 Step 20: AI Interior Design Chatbot UI (Phase 6)
+- **Design:** Implemented a premium **Glassmorphism Chat Panel** that slides over the AR view.
+- **Features:**
+    - Real-time interaction with an AI persona.
+    - **Interactive Suggestions:** AI-suggested colors appear as clickable buttons.
+    - **One-Tap Apply:** Users can apply a suggested color from chat directly to the wall in real-time.
+
+### 🔹 Step 21: Custom ML Model Training (Objective 2)
+- **Requirement:** supervisor required "Actual Model Training" for research validation.
+- **Implementation:** Developed a Python-based **Neural Network (MLP)** in Google Colab.
+- **Training:** Trained the model on 10,000 design rules to recommend colors based on room "Mood" (Modern, Warm, Calm).
+- **Export:** Successfully generated `color_reco_model.tflite` for on-device inference.
+
+### 🔹 Step 22: Hybrid AI Architecture (Objective 1)
+- **Innovation:** Transitioned from local-only to a **Hybrid Client-Server AI System**.
+- **Backend:** Deployed a **FastAPI Inference Server** on Google Colab (utilizing Free NVIDIA T4 GPU).
+- **Network Bridge:** Integrated **Ngrok Tunneling** to expose the Cloud-AI to the mobile device.
+- **Outcome:** The app now sends photos to the Cloud for professional-grade DeepLabV3+ segmentation, while maintaining a local fallback.
+
+### 🔹 Step 23: Project Plan V5 & Supervisor Documentation
+- Finalized **Full Project Plan V5**, documenting the new Hybrid architecture and ML training specifics.
+- Updated `MLService` and `ChatService` to bridge the gap between Cloud AI and the Mobile UI.
+### 🔹 Step 24: Dual-Surface Visualization (Objective 1 Complete)
+- **Feature:** Implemented **Floor Visualization** alongside Wall detection.
+- **UI:** Added a professional glassmorphic **Wall/Floor Selector** in the AR View.
+- **Engine Logic:** Updated `MLService` to perform context-aware sampling (Top for walls, Bottom for floors).
+- **Result:** Successfully fulfilled the research objective for "Wall & Floor Color Visualization."
+
+### 🔹 Step 25: Phase 8 — Local Persistence & Cloud History (Next)
+- **Plan:** Transition from ephemeral designs to persistent history.
+- **Storage Strategy:** Use **Internal Phone Storage** for high-res design snapshots (Privacy-focused).
+- **Metadata Sync:** Save design parameters (Color, Date, Surface) to Firebase Realtime Database.

@@ -6,6 +6,7 @@ import 'package:camera/camera.dart';
 import 'package:arcore_flutter_plugin/arcore_flutter_plugin.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/ml_service.dart';
+import '../services/chat_service.dart';
 
 // Use the global cameras list from main.dart
 import '../main.dart' show cameras;
@@ -36,6 +37,14 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
   List<Map<String, double>>? _segmentationMask;
   final ImagePicker _picker = ImagePicker();
 
+  // -- Chat State --
+  SegmentationTarget _currentTarget = SegmentationTarget.wall;
+  bool _isChatOpen = false;
+  final TextEditingController _chatController = TextEditingController();
+  final List<ChatMessage> _messages = [
+    ChatMessage(text: "Hello! I'm your AI designer. How can I help you style this room today?", isUser: false),
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +54,7 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
   Future<void> _initializeHybridEngine() async {
     // Start loading the ML model in the background
     _mlService.loadModel();
+    ChatService.loadModel(); // Load Recommendation Model (Objective 2)
     
     try {
       bool arAvailable = await ArCoreController.checkArCoreAvailability();
@@ -94,7 +104,7 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
     setState(() => _isProcessingML = true);
     try {
       final bytes = await imageFile.readAsBytes();
-      final mask = await _mlService.segmentWall(bytes);
+      final mask = await _mlService.segmentWall(bytes, target: _currentTarget);
       if (mounted) {
         setState(() {
           _segmentationMask = mask;
@@ -143,6 +153,23 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
     } else {
       Navigator.pop(context);
     }
+  }
+
+  void _sendMessage() async {
+    final text = _chatController.text.trim();
+    if (text.isEmpty) return;
+
+    setState(() {
+      _messages.add(ChatMessage(text: text, isUser: true));
+      _chatController.clear();
+    });
+
+    final response = await ChatService.getAIResponse(text);
+    final suggestedColor = ChatService.detectColorInResponse(response);
+
+    setState(() {
+      _messages.add(ChatMessage(text: response, isUser: false, suggestedColor: suggestedColor));
+    });
   }
 
   @override
@@ -271,6 +298,8 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  _targetSelector(),
+                  const SizedBox(height: 14),
                   _buildSlider(overlayColor),
                   const SizedBox(height: 14),
                   _buildColorPicker(),
@@ -280,6 +309,9 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
               ),
             ),
           ),
+
+          // --- LAYER 5: CHAT PANEL (OVERLAY) ---
+          if (_isChatOpen) _buildChatPanel(),
         ],
       ),
     );
@@ -290,6 +322,48 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
     if (_isArSupported) return ArCoreView(onArCoreViewCreated: (c) => _arCoreController = c, enablePlaneRenderer: true);
     if (_isCameraInitialized && _cameraController != null) return CameraPreview(_cameraController!);
     return const Center(child: Text('Camera not available', style: TextStyle(color: Colors.white38)));
+  }
+
+  Widget _targetSelector() {
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _targetOption(SegmentationTarget.wall, 'Wall'),
+          _targetOption(SegmentationTarget.floor, 'Floor'),
+        ],
+      ),
+    );
+  }
+
+  Widget _targetOption(SegmentationTarget target, String label) {
+    bool isSelected = _currentTarget == target;
+    return GestureDetector(
+      onTap: () => setState(() => _currentTarget = target),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.blueAccent : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.white60,
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildSlider(Color overlayColor) {
@@ -351,7 +425,11 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
             child: Icon(isDesignMode ? Icons.check : Icons.camera_alt_rounded, color: Colors.white),
           ),
         ),
-        const SizedBox(width: 56),
+        _actionButton(
+          icon: Icons.chat_bubble_outline_rounded,
+          label: 'ASK AI',
+          onTap: () => setState(() => _isChatOpen = true),
+        ),
       ],
     );
   }
@@ -375,6 +453,140 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
           Icon(icon, color: Colors.white),
           const SizedBox(height: 4),
           Text(label, style: const TextStyle(color: Colors.white, fontSize: 10)),
+        ],
+      ),
+    );
+  }
+
+  // --- CHAT COMPONENTS ---
+
+  Widget _buildChatPanel() {
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          GestureDetector(
+            onTap: () => setState(() => _isChatOpen = false),
+            child: Container(color: Colors.black54),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              height: MediaQuery.of(context).size.height * 0.7,
+              width: double.infinity,
+              decoration: const BoxDecoration(
+                color: Color(0xFF1A1A1A),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 20)],
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(top: 12, bottom: 8),
+                    width: 40, height: 4,
+                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    child: Row(
+                      children: [
+                        const Text('AI INTERIOR DESIGNER', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                        const Spacer(),
+                        _topIconButton(icon: Icons.close_rounded, onTap: () => setState(() => _isChatOpen = false)),
+                      ],
+                    ),
+                  ),
+                  const Divider(color: Colors.white10),
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(20),
+                      itemCount: _messages.length,
+                      itemBuilder: (context, index) => _buildChatBubble(_messages[index]),
+                    ),
+                  ),
+                  _buildChatInput(),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChatBubble(ChatMessage msg) {
+    return Align(
+      alignment: msg.isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(14),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+        decoration: BoxDecoration(
+          color: msg.isUser ? Colors.blueAccent : Colors.white10,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(16),
+            topRight: const Radius.circular(16),
+            bottomLeft: Radius.circular(msg.isUser ? 16 : 0),
+            bottomRight: Radius.circular(msg.isUser ? 0 : 16),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(msg.text, style: const TextStyle(color: Colors.white, fontSize: 13.5)),
+            if (msg.suggestedColor != null) ...[
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: () {
+                  setState(() {
+                    _baseColor = msg.suggestedColor!;
+                    _isChatOpen = false;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(width: 14, height: 14, decoration: BoxDecoration(color: msg.suggestedColor, shape: BoxShape.circle)),
+                      const SizedBox(width: 8),
+                      const Text('APPLY THIS COLOR', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChatInput() {
+    return Container(
+      padding: EdgeInsets.fromLTRB(16, 8, 16, MediaQuery.of(context).padding.bottom + 16),
+      decoration: const BoxDecoration(color: Color(0xFF252525), border: Border(top: BorderSide(color: Colors.white10))),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _chatController,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Ask for design advice...',
+                hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+                filled: true, fillColor: Colors.white10,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(25), borderSide: BorderSide.none),
+              ),
+              onSubmitted: (_) => _sendMessage(),
+            ),
+          ),
+          const SizedBox(width: 8),
+          CircleAvatar(
+            backgroundColor: Colors.blueAccent,
+            child: IconButton(icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18), onPressed: _sendMessage),
+          ),
         ],
       ),
     );

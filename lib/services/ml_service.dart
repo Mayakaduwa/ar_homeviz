@@ -1,6 +1,10 @@
 import 'dart:math' as math;
 import 'package:image/image.dart' as img;
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+enum SegmentationTarget { wall, floor }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Isolate worker — colour-based wall segmentation
@@ -9,6 +13,7 @@ import 'package:flutter/foundation.dart';
 Map<String, dynamic> _colorSegmentIsolate(Map<String, dynamic> args) {
   final Uint8List imageBytes = args['imageBytes'];
   final int maskSize = args['maskSize'];
+  final bool isFloor = args['isFloor'] ?? false;
 
   final img.Image? decoded = img.decodeImage(imageBytes);
   if (decoded == null) return {'segments': null, 'coverage': 0.0, 'wallPixels': 0};
@@ -27,6 +32,7 @@ Map<String, dynamic> _colorSegmentIsolate(Map<String, dynamic> args) {
   // ── Step 1: Sample "likely wall" zones ────────────────────────────────────
   // Walls appear in the top portion of interior photos, especially corners.
   // Zones: top-left strip, top-center strip, top-right strip (upper 20%)
+  // ── Step 1: Sample "target" zones ─────────────────────────────────────────
   final List<_LabColor> samples = [];
 
   void sampleZone(int x0, int x1, int y0, int y1) {
@@ -38,10 +44,15 @@ Map<String, dynamic> _colorSegmentIsolate(Map<String, dynamic> args) {
     }
   }
 
-  final int sampleH = (h * 0.20).toInt().clamp(4, h);
-  sampleZone(0, (w * 0.12).toInt().clamp(2, w), 0, sampleH);               // top-left
-  sampleZone((w * 0.35).toInt(), (w * 0.65).toInt(), 0, sampleH);          // top-center
-  sampleZone((w * 0.88).toInt().clamp(0, w - 2), w, 0, sampleH);          // top-right
+  // Floor sampling (bottom center) vs Wall sampling (top strips)
+  if (isFloor) {
+    sampleZone((w * 0.4).toInt(), (w * 0.6).toInt(), (h * 0.8).toInt(), h);
+  } else {
+    final int sampleH = (h * 0.20).toInt().clamp(4, h);
+    sampleZone(0, (w * 0.12).toInt().clamp(2, w), 0, sampleH);               // top-left
+    sampleZone((w * 0.35).toInt(), (w * 0.65).toInt(), 0, sampleH);          // top-center
+    sampleZone((w * 0.88).toInt().clamp(0, w - 2), w, 0, sampleH);          // top-right
+  }
 
   if (samples.isEmpty) return {'segments': null, 'coverage': 0.0, 'wallPixels': 0};
 
@@ -161,6 +172,9 @@ class MLService {
 
   /// Public maskSize that the painter uses for coordinate scaling.
   static const int _kMaskSize = 128;
+  
+  /// YOUR NGROK URL FROM COLAB
+  static const String _kRemoteApiUrl = "https://evacuate-contents-species.ngrok-free.dev";
 
   bool get isModelLoaded => _isReady;
   int get maskSize => _kMaskSize;
@@ -171,36 +185,88 @@ class MLService {
     print('✅ MLService ready — colour-based wall detector (maskSize=$_kMaskSize)');
   }
 
-  /// Returns optimised horizontal-segment list, or null for fallback overlay.
-  Future<List<Map<String, double>>?> segmentWall(Uint8List imageBytes) async {
+  Future<List<Map<String, double>>?> segmentWall(
+    Uint8List imageBytes, {
+    SegmentationTarget target = SegmentationTarget.wall,
+  }) async {
     if (!_isReady) return null;
 
+    // --- STEP A: TRY REMOTE AI (OBJECTIVE 1) ---
+    try {
+      print('🌐 Attempting Cloud AI (${target.name}) Segmentation...');
+      var request = http.MultipartRequest('POST', Uri.parse('$_kRemoteApiUrl/segment'));
+      request.fields['target'] = target.name;
+      request.files.add(http.MultipartFile.fromBytes('file', imageBytes, filename: 'input.jpg'));
+      
+      var streamedResponse = await request.send().timeout(const Duration(seconds: 8));
+      var response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> rawMask = data['mask'];
+        return _processRemoteMask(rawMask, target);
+      }
+    } catch (e) {
+      print('⚠️ Cloud AI unavailable (using local fallback): $e');
+    }
+
+    // --- STEP B: LOCAL FALLBACK (COLOUR-BASED) ---
     try {
       final result = await compute(_colorSegmentIsolate, {
         'imageBytes': imageBytes,
         'maskSize': _kMaskSize,
+        'isFloor': target == SegmentationTarget.floor,
       });
 
       final segments = result['segments'] as List<Map<String, double>>?;
       final double coverage = result['coverage'] as double? ?? 0.0;
-      final int wallPixels = result['wallPixels'] as int? ?? 0;
-
-      print('✅ Wall detection: $wallPixels px '
-          '(${(coverage * 100).toStringAsFixed(1)}%), '
-          '${segments?.length ?? 0} segments');
-
-      // If coverage is extremely low (<5%) or suspiciously high (>90%),
-      // the sampling zone wasn't ideal — use full-screen fallback overlay.
-      if (segments == null || coverage < 0.05 || coverage > 0.90) {
-        print('⚠️ Coverage out of range — using fallback overlay.');
-        return null;
-      }
-
+      
+      if (segments == null || coverage < 0.05 || coverage > 0.90) return null;
       return segments;
     } catch (e) {
-      print('❌ Wall detection error: $e');
+      print('❌ Local detection error: $e');
       return null;
     }
+  }
+
+  /// Converts a 2D grid mask from the server into optimized horizontal segments
+  List<Map<String, double>> _processRemoteMask(List<dynamic> rawMask, SegmentationTarget target) {
+    final List<Map<String, double>> segments = [];
+    final int h = rawMask.length;
+    final int w = rawMask[0].length;
+    
+    final double stepY = h / _kMaskSize;
+    final double stepX = w / _kMaskSize;
+
+    for (int y = 0; y < _kMaskSize; y++) {
+      int? startX;
+      for (int x = 0; x < _kMaskSize; x++) {
+        final int py = (y * stepY).toInt().clamp(0, h - 1);
+        final int px = (x * stepX).toInt().clamp(0, w - 1);
+        
+        final int label = rawMask[py][px];
+        
+        // CLASS MAPPING:
+        // DeepLabV3 usually: Class 0=Background/Wall, Class 3=Floor (PASCAL VOC)
+        bool isTarget = false;
+        if (target == SegmentationTarget.wall) {
+          isTarget = (label == 0); // Background/Wall
+        } else {
+          isTarget = (label == 3); // Floor
+        }
+
+        if (isTarget && startX == null) {
+          startX = x;
+        } else if (!isTarget && startX != null) {
+          segments.add({'x': startX.toDouble(), 'y': y.toDouble(), 'w': (x - startX).toDouble()});
+          startX = null;
+        }
+      }
+      if (startX != null) {
+        segments.add({'x': startX.toDouble(), 'y': y.toDouble(), 'w': (_kMaskSize - startX).toDouble()});
+      }
+    }
+    return segments;
   }
 
   void dispose() {

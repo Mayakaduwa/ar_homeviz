@@ -45,6 +45,7 @@ dependencies:
   # AI Chatbot (Gemini)
   google_generative_ai: ^0.4.6
   image: ^4.2.0
+  http: ^1.2.1
 
 dev_dependencies:
   flutter_test:
