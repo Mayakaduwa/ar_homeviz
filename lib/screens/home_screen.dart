@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'ar_view_screen.dart';
+import 'my_gallery_screen.dart';
+import 'profile_screen.dart';
+import 'recommendations_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -87,21 +90,21 @@ class _HomeScreenState extends State<HomeScreen> {
                     subtitle: 'Get smart design advice',
                     icon: Icons.auto_awesome_rounded,
                     color: Colors.purpleAccent,
-                    onTap: () => _showComingSoon('AI Chatbot'),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ARVisualizationScreen())), // Navigates to AR which has the chat
                   ),
                   _featureCard(
                     title: 'My Gallery',
                     subtitle: 'View your saved designs',
                     icon: Icons.photo_library_rounded,
                     color: Colors.orangeAccent,
-                    onTap: () => _showComingSoon('Gallery'),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MyGalleryScreen())),
                   ),
                   _featureCard(
                     title: 'Color Palettes',
                     subtitle: 'Smart recommendations',
                     icon: Icons.palette_rounded,
                     color: Colors.greenAccent,
-                    onTap: () => _showComingSoon('Color Palettes'),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecommendationsScreen())),
                   ),
                 ]),
               ),
@@ -187,7 +190,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _profileIcon() {
     return PopupMenuButton<String>(
       onSelected: (val) {
-        if (val == 'logout') FirebaseAuth.instance.signOut();
+        if (val == 'logout') {
+          FirebaseAuth.instance.signOut();
+        } else if (val == 'profile') {
+          Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
+        }
       },
       itemBuilder: (context) => [
         const PopupMenuItem(value: 'profile', child: Text('Profile Settings')),

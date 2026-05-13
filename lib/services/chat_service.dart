@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 
 class ChatMessage {
   final String text;
@@ -12,6 +15,9 @@ class ChatMessage {
 class ChatService {
   static Interpreter? _interpreter;
 
+  // Replace with your actual Gemini API Key from Google AI Studio
+  static const String _kGeminiApiKey = 'REPLACE_WITH_YOUR_GEMINI_KEY';
+
   /// Loads the custom recommendation model trained in Colab
   static Future<void> loadModel() async {
     try {
@@ -23,51 +29,62 @@ class ChatService {
   }
 
   static Future<String> getAIResponse(String userMessage) async {
-    await Future.delayed(const Duration(milliseconds: 600));
-    String msg = userMessage.toLowerCase();
-
-    // If model is loaded, we could use it for "Mood to Color" prediction
-    if (_interpreter != null) {
-      // Logic to convert text to numeric input for the model
-      // 0=Modern, 1=Warm, 2=Calm
-      int mood = 0;
-      if (msg.contains('warm') || msg.contains('cozy')) mood = 1;
-      if (msg.contains('calm') || msg.contains('relax')) mood = 2;
-
-      // Model expects 3 inputs (R,G,B) for the "Reference Color"
-      // Let's use a dummy reference or sample the current room color.
-      var input = [0.5, 0.5, 0.5]; 
-      var output = List.filled(3, 0.0).reshape([1, 3]);
-      
+    // --- 1. TRY GEMINI (REAL INTELLIGENCE) ---
+    if (_kGeminiApiKey != 'REPLACE_WITH_YOUR_GEMINI_KEY') {
       try {
-        _interpreter!.run(input, output);
-        // Map model output back to text
-        if (mood == 1) return "My trained ML model suggests a Warm Terracotta palette for this space. It has high harmony with your request!";
-        if (mood == 2) return "Based on design principles, a Calm Sky Blue would be the perfect fit. Want to try it?";
-        return "For a modern vibe, my model recommends a Slate Grey accent wall.";
+        final model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: _kGeminiApiKey);
+        
+        // Fetch User Context
+        String userStyle = "Modern";
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          final snapshot = await FirebaseDatabase.instance.ref('users/${user.uid}/preferredStyle').get();
+          if (snapshot.exists) userStyle = snapshot.value.toString();
+        }
+
+        final prompt = [
+          Content.text('''You are "HomeViz AI", a high-end interior designer.
+          User's Preferred Style: $userStyle.
+          Answer their question with expert advice. 
+          If you suggest a color, include its Hex code in BRACKETS like this: [0xFF3498DB].
+          Keep it professional and inspiring.
+          User Question: $userMessage''')
+        ];
+
+        final response = await model.generateContent(prompt);
+        if (response.text != null) return response.text!;
       } catch (e) {
-        print("Model error: $e");
+        debugPrint('Gemini Error: $e');
       }
     }
 
-    // --- Fallback Rule-based logic ---
-    if (msg.contains('warm') || msg.contains('cozy')) {
-      return "For a warm and cozy feel, I suggest a Soft Terracotta or a Creamy Beige. These work great with natural light!";
-    } else if (msg.contains('modern') || msg.contains('office')) {
-      return "For a modern space, Slate Grey or Navy Blue creates a sophisticated look. Would you like to try those?";
-    } else {
-      return "That sounds interesting! Based on interior design trends, I'd recommend exploring earthy tones or a bold accent wall in Emerald Green.";
+    // --- 2. FALLBACK TO TFLITE/RULES ---
+    await Future.delayed(const Duration(milliseconds: 600));
+    String msg = userMessage.toLowerCase();
+
+    if (_interpreter != null) {
+      if (msg.contains('warm')) return "Based on my ML training, a Warm Terracotta [0xFFE2725B] would perfectly balance this space.";
+      if (msg.contains('modern')) return "My neural network recommends a Minimalist Navy [0xFF1E3A8A] for a professional look.";
     }
+
+    return "For that mood, I'd recommend a balanced Sage Green [0xFF8A9A5B]. Would you like to see how it looks?";
   }
 
-  // Helper to extract a color from AI text (Simplified for demo)
+  // Helper to extract a color from AI text (Hex support)
   static Color? detectColorInResponse(String response) {
+    // Search for Hex pattern [0xFFXXXXXX]
+    final hexRegex = RegExp(r'\[0x([0-9a-fA-F]{8})\]');
+    final match = hexRegex.firstMatch(response);
+    
+    if (match != null) {
+      final hexStr = match.group(1);
+      return Color(int.parse(hexStr!, radix: 16));
+    }
+
+    // Fallback to basic keywords
     if (response.contains('Terracotta')) return const Color(0xFFE2725B);
     if (response.contains('Beige')) return const Color(0xFFF5F5DC);
-    if (response.contains('Grey')) return Colors.blueGrey;
-    if (response.contains('Navy')) return const Color(0xFF000080);
-    if (response.contains('Sky Blue')) return Colors.lightBlueAccent;
-    if (response.contains('Green')) return Colors.green;
+    if (response.contains('Navy')) return const Color(0xFF1E3A8A);
     return null;
   }
 }

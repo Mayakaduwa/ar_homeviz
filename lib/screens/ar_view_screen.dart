@@ -2,9 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 import 'package:camera/camera.dart';
 import 'package:arcore_flutter_plugin/arcore_flutter_plugin.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import '../services/ml_service.dart';
 import '../services/chat_service.dart';
 
@@ -35,6 +40,7 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
   Color _baseColor = Colors.blueAccent;
   File? _imageFile;
   List<Map<String, double>>? _segmentationMask;
+  final GlobalKey _saveKey = GlobalKey();
   final ImagePicker _picker = ImagePicker();
 
   // -- Chat State --
@@ -184,34 +190,37 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
         children: [
           // --- LAYER 1: Background Content ---
           isDesignMode
-              ? InteractiveViewer(
-                  panEnabled: true,
-                  minScale: 0.8,
-                  maxScale: 5.0,
-                  child: Center(
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Image.file(_imageFile!, fit: BoxFit.contain),
-                        // ALWAYS show color overlay — switches to smart mask when ML is ready
-                        Positioned.fill(
-                          child: IgnorePointer(
-                            child: _segmentationMask != null
-                                ? CustomPaint(
-                                    painter: SegmentationPainter(
-                                      mask: _segmentationMask!,
-                                      color: overlayColor,
-                                      maskSize: _mlService.maskSize,
+              ? RepaintBoundary(
+                  key: _saveKey,
+                  child: InteractiveViewer(
+                    panEnabled: true,
+                    minScale: 0.8,
+                    maxScale: 5.0,
+                    child: Center(
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Image.file(_imageFile!, fit: BoxFit.contain),
+                          // ALWAYS show color overlay — switches to smart mask when ML is ready
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: _segmentationMask != null
+                                  ? CustomPaint(
+                                      painter: SegmentationPainter(
+                                        mask: _segmentationMask!,
+                                        color: overlayColor,
+                                        maskSize: _mlService.maskSize,
+                                      ),
+                                    )
+                                  : CustomPaint(
+                                      painter: FallbackOverlayPainter(
+                                        color: overlayColor,
+                                      ),
                                     ),
-                                  )
-                                : CustomPaint(
-                                    painter: FallbackOverlayPainter(
-                                      color: overlayColor,
-                                    ),
-                                  ),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 )
@@ -416,7 +425,7 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
         if (!isDesignMode)
           _actionButton(icon: Icons.photo_library_rounded, label: 'GALLERY', onTap: _pickFromGallery)
         else
-          _actionButton(icon: Icons.save_alt_rounded, label: 'SAVE', onTap: () {}),
+          _actionButton(icon: Icons.save_alt_rounded, label: 'SAVE', onTap: _saveDesignToInternalStorage),
         GestureDetector(
           onTap: isDesignMode ? () {} : _capturePhoto,
           child: Container(
@@ -443,6 +452,61 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
         child: Icon(icon, color: Colors.white, size: 20),
       ),
     );
+  }
+
+  Future<void> _saveDesignToInternalStorage() async {
+    try {
+      setState(() => _isProcessingML = true);
+      
+      // 1. Capture the boundary as an image
+      RenderRepaintBoundary boundary = _saveKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      ui.Image image = await boundary.toImage(pixelRatio: 3.0); // High-res capture
+      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      Uint8List pngBytes = byteData!.buffer.asUint8List();
+
+      // 2. Find/Create the local directory
+      final directory = await getApplicationDocumentsDirectory();
+      final String designsPath = '${directory.path}/Designs';
+      final designsDir = Directory(designsPath);
+      if (!await designsDir.exists()) await designsDir.create(recursive: true);
+
+      // 3. Save the file
+      final String fileName = 'Design_${DateTime.now().millisecondsSinceEpoch}.png';
+      final File imgFile = File('$designsPath/$fileName');
+      await imgFile.writeAsBytes(pngBytes);
+
+      // 4. Log metadata to Firebase Realtime Database
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await FirebaseDatabase.instance.ref('users/${user.uid}/history').push().set({
+          'imageName': fileName,
+          'localPath': imgFile.path,
+          'colorHex': _baseColor.value.toRadixString(16),
+          'target': _currentTarget.name,
+          'intensity': _intensity,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        });
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Design saved successfully!'),
+            backgroundColor: Colors.green[800],
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Save error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to save design.'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessingML = false);
+    }
   }
 
   Widget _actionButton({required IconData icon, required String label, required VoidCallback onTap}) {
