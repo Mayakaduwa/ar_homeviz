@@ -33,7 +33,7 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
   double _intensity = 0.35;
   Color _baseColor = Colors.blueAccent;
   File? _imageFile;
-  Uint8List? _segmentationMask;
+  List<Map<String, double>>? _segmentationMask;
   final ImagePicker _picker = ImagePicker();
 
   @override
@@ -177,7 +177,11 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
                                       maskSize: _mlService.maskSize,
                                     ),
                                   )
-                                : Container(color: overlayColor),
+                                : CustomPaint(
+                                    painter: FallbackOverlayPainter(
+                                      color: overlayColor,
+                                    ),
+                                  ),
                           ),
                         ),
                       ],
@@ -379,7 +383,7 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
 
 /// Custom Painter to draw the wall segmentation mask
 class SegmentationPainter extends CustomPainter {
-  final Uint8List mask;
+  final List<Map<String, double>> mask;
   final Color color;
   final int maskSize;
 
@@ -388,7 +392,6 @@ class SegmentationPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // USE BlendMode.softLight for realistic painting
-    // This allows wall texture/shadows to show through the color
     final paint = Paint()
       ..color = color
       ..blendMode = BlendMode.softLight
@@ -397,22 +400,45 @@ class SegmentationPainter extends CustomPainter {
     final double scaleX = size.width / maskSize;
     final double scaleY = size.height / maskSize;
 
-    for (int y = 0; y < maskSize; y++) {
-      for (int x = 0; x < maskSize; x++) {
-        if (mask[y * maskSize + x] == 1) {
-          // Draw a small rect for each wall pixel
-          // Adding 0.8 to width/height to overlap slightly and remove "grid" lines
-          canvas.drawRect(
-            Rect.fromLTWH(x * scaleX, y * scaleY, scaleX + 0.8, scaleY + 0.8),
-            paint,
-          );
-        }
-      }
+    // Drawing optimized segments instead of 66,000 pixels
+    for (final segment in mask) {
+      final double x = segment['x']! * scaleX;
+      final double y = segment['y']! * scaleY;
+      final double w = segment['w']! * scaleX;
+      
+      // Draw the horizontal segment
+      // Use +1.0 height to avoid horizontal gaps between rows
+      canvas.drawRect(
+        Rect.fromLTWH(x, y, w + 0.5, scaleY + 0.5),
+        paint,
+      );
     }
   }
 
   @override
   bool shouldRepaint(covariant SegmentationPainter oldDelegate) {
     return oldDelegate.color != color || oldDelegate.mask != mask;
+  }
+}
+
+/// Fallback painter that colors the whole screen with SoftLight blend
+class FallbackOverlayPainter extends CustomPainter {
+  final Color color;
+
+  FallbackOverlayPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..blendMode = BlendMode.softLight
+      ..style = PaintingStyle.fill;
+
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant FallbackOverlayPainter oldDelegate) {
+    return oldDelegate.color != color;
   }
 }

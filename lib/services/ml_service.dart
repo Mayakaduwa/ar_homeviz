@@ -1,150 +1,209 @@
-import 'dart:typed_data';
-import 'dart:isolate';
-import 'package:tflite_flutter/tflite_flutter.dart';
+import 'dart:math' as math;
 import 'package:image/image.dart' as img;
-import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 
-/// Runs in a separate isolate to avoid blocking the UI thread.
-Future<Float32List?> _runInferenceIsolate(Map<String, dynamic> args) async {
+// ─────────────────────────────────────────────────────────────────────────────
+// Isolate worker — colour-based wall segmentation
+// ─────────────────────────────────────────────────────────────────────────────
+
+Map<String, dynamic> _colorSegmentIsolate(Map<String, dynamic> args) {
   final Uint8List imageBytes = args['imageBytes'];
-  final int inputSize = args['inputSize'];
+  final int maskSize = args['maskSize'];
 
-  try {
-    img.Image? image = img.decodeImage(imageBytes);
-    if (image == null) return null;
+  final img.Image? decoded = img.decodeImage(imageBytes);
+  if (decoded == null) return {'segments': null, 'coverage': 0.0, 'wallPixels': 0};
 
-    img.Image resized = img.copyResize(image,
-        width: inputSize, height: inputSize,
-        interpolation: img.Interpolation.linear);
+  // Scale down to maskSize×maskSize for fast processing
+  final img.Image small = img.copyResize(
+    decoded,
+    width: maskSize,
+    height: maskSize,
+    interpolation: img.Interpolation.linear,
+  );
 
-    final input = Float32List(1 * inputSize * inputSize * 3);
-    int idx = 0;
-    for (int y = 0; y < inputSize; y++) {
-      for (int x = 0; x < inputSize; x++) {
-        final pixel = resized.getPixel(x, y);
-        input[idx++] = pixel.r / 255.0;
-        input[idx++] = pixel.g / 255.0;
-        input[idx++] = pixel.b / 255.0;
+  final int w = small.width;
+  final int h = small.height;
+
+  // ── Step 1: Sample "likely wall" zones ────────────────────────────────────
+  // Walls appear in the top portion of interior photos, especially corners.
+  // Zones: top-left strip, top-center strip, top-right strip (upper 20%)
+  final List<_LabColor> samples = [];
+
+  void sampleZone(int x0, int x1, int y0, int y1) {
+    for (int y = y0; y < y1; y++) {
+      for (int x = x0; x < x1; x++) {
+        final p = small.getPixel(x, y);
+        samples.add(_rgbToLab(p.r.toInt(), p.g.toInt(), p.b.toInt()));
       }
     }
-    return input;
-  } catch (e) {
-    return null;
   }
-}
 
-class MLService {
-  Interpreter? _interpreter;
-  bool _isModelLoaded = false;
-  int _inputSize = 257;
-  int _numClasses = 21; // DeepLabV3 PASCAL VOC has 21 classes
+  final int sampleH = (h * 0.20).toInt().clamp(4, h);
+  sampleZone(0, (w * 0.12).toInt().clamp(2, w), 0, sampleH);               // top-left
+  sampleZone((w * 0.35).toInt(), (w * 0.65).toInt(), 0, sampleH);          // top-center
+  sampleZone((w * 0.88).toInt().clamp(0, w - 2), w, 0, sampleH);          // top-right
 
-  // 'wall' is class 9 in PASCAL VOC (indoor scenes)
-  // For general scenes we treat 'background' class as the wall-ish region
-  static const String modelPath = 'assets/models/deeplabv3.tflite';
+  if (samples.isEmpty) return {'segments': null, 'coverage': 0.0, 'wallPixels': 0};
 
-  bool get isModelLoaded => _isModelLoaded;
+  // Median LAB = representative "wall" colour
+  final double refL = _median(samples.map((s) => s.l).toList());
+  final double refA = _median(samples.map((s) => s.a).toList());
+  final double refB = _median(samples.map((s) => s.b).toList());
+  final _LabColor refWall = _LabColor(refL, refA, refB);
 
-  Future<void> loadModel() async {
-    try {
-      final options = InterpreterOptions()..threads = 2;
-      _interpreter = await Interpreter.fromAsset(modelPath, options: options);
+  // ── Step 2: Classify pixels ───────────────────────────────────────────────
+  // Delta-E threshold: 38 is generous for unlit rooms; tighten to 28 if too noisy.
+  const double kThreshold = 38.0;
 
-      // Read actual input/output shapes from the model
-      final inputShape = _interpreter!.getInputTensor(0).shape;
-      final outputShape = _interpreter!.getOutputTensor(0).shape;
-
-      // inputShape: [1, H, W, 3]
-      _inputSize = inputShape[1];
-      // outputShape: [1, H, W, numClasses]
-      _numClasses = outputShape[3];
-
-      _isModelLoaded = true;
-      print('✅ ML Model loaded. Input: $inputShape  Output: $outputShape  InputSize: $_inputSize  Classes: $_numClasses');
-    } catch (e) {
-      _isModelLoaded = false;
-      print('❌ Failed to load ML model: $e');
+  final List<bool> mask = List.filled(w * h, false);
+  for (int y = 0; y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      final p = small.getPixel(x, y);
+      final lab = _rgbToLab(p.r.toInt(), p.g.toInt(), p.b.toInt());
+      mask[y * w + x] = _deltaE(lab, refWall) < kThreshold;
     }
   }
 
-  /// Returns a flat mask [inputSize * inputSize]:
-  ///   1 = detected non-person region (wall/background), 0 = person/object
-  Future<Uint8List?> segmentWall(Uint8List imageBytes) async {
-    if (!_isModelLoaded || _interpreter == null) {
-      print('⚠️ Model not loaded — using full-screen color fallback.');
-      return null;
-    }
-
-    try {
-      // Pre-process image in isolate to avoid blocking UI
-      final preprocessed = await compute(_runInferenceIsolate, {
-        'imageBytes': imageBytes,
-        'inputSize': _inputSize,
-      });
-      if (preprocessed == null) return null;
-
-      // Reshape to [1, H, W, 3]
-      final inputTensor =
-          preprocessed.reshape([1, _inputSize, _inputSize, 3]);
-
-      // Output: [1, H, W, numClasses]
-      final outputTensor = List.generate(
-        1,
-        (_) => List.generate(
-          _inputSize,
-          (_) => List.generate(
-            _inputSize,
-            (_) => List.filled(_numClasses, 0.0),
-          ),
-        ),
-      );
-
-      _interpreter!.run(inputTensor, outputTensor);
-
-      // Post-process: argmax over classes
-      // In PASCAL VOC: 0=background, 9=chair, 11=diningtable, 15=person, 18=sofa, 20=tvmonitor
-      // We want ONLY the background (0) but we MUST ensure we don't paint over objects.
-      final mask = Uint8List(_inputSize * _inputSize);
-      for (int y = 0; y < _inputSize; y++) {
-        for (int x = 0; x < _inputSize; x++) {
-          final scores = outputTensor[0][y][x] as List;
-          int maxClass = 0;
-          double maxScore = scores[0] as double;
-          
-          for (int c = 1; c < _numClasses; c++) {
-            final s = scores[c] as double;
-            if (s > maxScore) {
-              maxScore = s;
-              maxClass = c;
-            }
-          }
-
-          // IMPROVEMENT: Strictly exclude common indoor objects
-          // If the model thinks it's a chair (9), table (11), person (15), sofa (18), or TV (20),
-          // we force the mask to 0 (don't paint).
-          const ignoredClasses = {9, 11, 15, 18, 20};
-          if (ignoredClasses.contains(maxClass)) {
-            mask[y * _inputSize + x] = 0;
-          } else {
-            // Otherwise, if it's background (0), it's likely our wall.
-            mask[y * _inputSize + x] = (maxClass == 0) ? 1 : 0;
-          }
+  // ── Step 3: Erosion — remove noise (keep pixel only if ≥4 neighbours match)
+  final List<bool> clean = List.filled(w * h, false);
+  for (int y = 1; y < h - 1; y++) {
+    for (int x = 1; x < w - 1; x++) {
+      if (!mask[y * w + x]) continue;
+      int n = 0;
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          if (dx == 0 && dy == 0) continue;
+          if (mask[(y + dy) * w + (x + dx)]) n++;
         }
       }
+      clean[y * w + x] = n >= 4;
+    }
+  }
 
-      print('✅ Segmentation complete. Mask size: ${_inputSize}x${_inputSize}');
-      return mask;
+  // ── Step 4: Merge into horizontal segments ────────────────────────────────
+  final List<Map<String, double>> segments = [];
+  int wallPixels = 0;
+
+  for (int y = 0; y < h; y++) {
+    int? startX;
+    for (int x = 0; x < w; x++) {
+      final isWall = clean[y * w + x];
+      if (isWall) wallPixels++;
+
+      if (isWall && startX == null) {
+        startX = x;
+      } else if (!isWall && startX != null) {
+        segments.add({'x': startX.toDouble(), 'y': y.toDouble(), 'w': (x - startX).toDouble()});
+        startX = null;
+      }
+    }
+    if (startX != null) {
+      segments.add({'x': startX.toDouble(), 'y': y.toDouble(), 'w': (w - startX).toDouble()});
+    }
+  }
+
+  final double coverage = wallPixels / (w * h);
+  return {'segments': segments, 'coverage': coverage, 'wallPixels': wallPixels};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LAB colour helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _LabColor {
+  final double l, a, b;
+  const _LabColor(this.l, this.a, this.b);
+}
+
+_LabColor _rgbToLab(int r, int g, int b) {
+  // sRGB → linear
+  double rl = r / 255.0;
+  double gl = g / 255.0;
+  double bl = b / 255.0;
+  rl = rl > 0.04045 ? math.pow((rl + 0.055) / 1.055, 2.4).toDouble() : rl / 12.92;
+  gl = gl > 0.04045 ? math.pow((gl + 0.055) / 1.055, 2.4).toDouble() : gl / 12.92;
+  bl = bl > 0.04045 ? math.pow((bl + 0.055) / 1.055, 2.4).toDouble() : bl / 12.92;
+
+  // linear → XYZ D65
+  double x = (rl * 0.4124 + gl * 0.3576 + bl * 0.1805) / 0.95047;
+  double y = (rl * 0.2126 + gl * 0.7152 + bl * 0.0722) / 1.00000;
+  double z = (rl * 0.0193 + gl * 0.1192 + bl * 0.9505) / 1.08883;
+
+  double f(double t) => t > 0.008856 ? math.pow(t, 1.0 / 3.0).toDouble() : (7.787 * t + 16.0 / 116.0);
+
+  return _LabColor(
+    116.0 * f(y) - 16.0,
+    500.0 * (f(x) - f(y)),
+    200.0 * (f(y) - f(z)),
+  );
+}
+
+double _deltaE(_LabColor a, _LabColor b) {
+  final dl = a.l - b.l;
+  final da = a.a - b.a;
+  final db = a.b - b.b;
+  return math.sqrt(dl * dl + da * da + db * db);
+}
+
+double _median(List<double> v) {
+  if (v.isEmpty) return 0;
+  v.sort();
+  final m = v.length ~/ 2;
+  return v.length.isOdd ? v[m] : (v[m - 1] + v[m]) / 2.0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MLService public API (unchanged interface so ar_view_screen.dart works as-is)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class MLService {
+  bool _isReady = false;
+
+  /// Public maskSize that the painter uses for coordinate scaling.
+  static const int _kMaskSize = 128;
+
+  bool get isModelLoaded => _isReady;
+  int get maskSize => _kMaskSize;
+
+  /// No model file needed — just marks the service ready immediately.
+  Future<void> loadModel() async {
+    _isReady = true;
+    print('✅ MLService ready — colour-based wall detector (maskSize=$_kMaskSize)');
+  }
+
+  /// Returns optimised horizontal-segment list, or null for fallback overlay.
+  Future<List<Map<String, double>>?> segmentWall(Uint8List imageBytes) async {
+    if (!_isReady) return null;
+
+    try {
+      final result = await compute(_colorSegmentIsolate, {
+        'imageBytes': imageBytes,
+        'maskSize': _kMaskSize,
+      });
+
+      final segments = result['segments'] as List<Map<String, double>>?;
+      final double coverage = result['coverage'] as double? ?? 0.0;
+      final int wallPixels = result['wallPixels'] as int? ?? 0;
+
+      print('✅ Wall detection: $wallPixels px '
+          '(${(coverage * 100).toStringAsFixed(1)}%), '
+          '${segments?.length ?? 0} segments');
+
+      // If coverage is extremely low (<5%) or suspiciously high (>90%),
+      // the sampling zone wasn't ideal — use full-screen fallback overlay.
+      if (segments == null || coverage < 0.05 || coverage > 0.90) {
+        print('⚠️ Coverage out of range — using fallback overlay.');
+        return null;
+      }
+
+      return segments;
     } catch (e) {
-      print('❌ ML inference error: $e');
+      print('❌ Wall detection error: $e');
       return null;
     }
   }
 
-  int get maskSize => _inputSize;
-
   void dispose() {
-    _interpreter?.close();
-    _isModelLoaded = false;
+    _isReady = false;
   }
 }
