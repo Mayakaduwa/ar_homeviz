@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 import 'ar_view_screen.dart';
 
 class RecommendationsScreen extends StatelessWidget {
@@ -60,10 +62,7 @@ class RecommendationsScreen extends StatelessWidget {
         border: Border.all(color: Colors.white.withOpacity(0.05)),
       ),
       child: InkWell(
-        onTap: () {
-          // In a real app, we'd pass the first color to the AR view
-          Navigator.push(context, MaterialPageRoute(builder: (_) => const ARVisualizationScreen()));
-        },
+        onTap: () => _handlePaletteTap(context, palette),
         borderRadius: BorderRadius.circular(24),
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -106,6 +105,65 @@ class RecommendationsScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  void _handlePaletteTap(BuildContext context, Map<String, dynamic> palette) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E293B),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('VISUALIZE THIS PALETTE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1)),
+              const SizedBox(height: 24),
+              _optionTile(
+                context,
+                icon: Icons.camera_alt_rounded,
+                title: 'Capture Room Photo',
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => ARVisualizationScreen(
+                    initialColor: Color(palette['colors'][0]),
+                  )));
+                },
+              ),
+              const SizedBox(height: 16),
+              _optionTile(
+                context,
+                icon: Icons.photo_library_rounded,
+                title: 'Choose from Gallery',
+                onTap: () async {
+                  final picker = ImagePicker();
+                  final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+                  if (pickedFile != null && context.mounted) {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => ARVisualizationScreen(
+                      initialImage: File(pickedFile.path),
+                      initialColor: Color(palette['colors'][0]),
+                    )));
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _optionTile(BuildContext context, {required IconData icon, required String title, required VoidCallback onTap}) {
+    return ListTile(
+      onTap: onTap,
+      leading: Icon(icon, color: Colors.blueAccent),
+      title: Text(title, style: const TextStyle(color: Colors.white)),
+      trailing: const Icon(Icons.chevron_right, color: Colors.white24),
+      tileColor: Colors.white.withOpacity(0.03),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     );
   }
 }

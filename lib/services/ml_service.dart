@@ -63,8 +63,9 @@ Map<String, dynamic> _colorSegmentIsolate(Map<String, dynamic> args) {
   final _LabColor refWall = _LabColor(refL, refA, refB);
 
   // ── Step 2: Classify pixels ───────────────────────────────────────────────
-  // Delta-E threshold: 38 is generous for unlit rooms; tighten to 28 if too noisy.
-  const double kThreshold = 38.0;
+  // Delta-E threshold: 30 is better balanced for indoor lighting vs the original 38
+  // (tighter = fewer false positives; wider = catches more wall pixels in dark rooms)
+  const double kThreshold = 30.0;
 
   final List<bool> mask = List.filled(w * h, false);
   for (int y = 0; y < h; y++) {
@@ -221,7 +222,11 @@ class MLService {
       final segments = result['segments'] as List<Map<String, double>>?;
       final double coverage = result['coverage'] as double? ?? 0.0;
       
-      if (segments == null || coverage < 0.05 || coverage > 0.90) return null;
+      // BUG-005: Don't return null on high coverage (white/light walls score > 0.90)
+      // Instead accept it and let FallbackOverlayPainter handle the coloring
+      if (segments == null || coverage < 0.04) return null;
+      // If coverage is impossibly high (> 0.95) return null — probably a blank/solid image
+      if (coverage > 0.95) return null;
       return segments;
     } catch (e) {
       print('❌ Local detection error: $e');

@@ -5,6 +5,7 @@ import 'ar_view_screen.dart';
 import 'my_gallery_screen.dart';
 import 'profile_screen.dart';
 import 'recommendations_screen.dart';
+import 'chat_bot_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -90,7 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     subtitle: 'Get smart design advice',
                     icon: Icons.auto_awesome_rounded,
                     color: Colors.purpleAccent,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ARVisualizationScreen())), // Navigates to AR which has the chat
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChatBotScreen())),
                   ),
                   _featureCard(
                     title: 'My Gallery',

@@ -134,6 +134,13 @@
 - **Feature:** Developed the Profile Screen linked to Firebase Realtime Database.
 - **Logic:** Users can now set a "Preferred Style" (e.g., Minimalist) which influences the AI.
 
+### 🔹 Step 9: AI Refinement & Integration Milestones
+- [x] Step 30: Expert Color Recommendations integration.
+- [x] Step 31: Redesigned AI Decor Agent with full-screen UI and image support.
+- [x] Step 32: Implemented 3-Tier AI Logic (Kaggle -> Gemini -> Local Fallback).
+- [x] Step 33: Integrated Deep-Linking (Palette/Chat -> AR Designer) with parameters.
+- [x] Step 34: Fixed build errors in Profile and Chat screens (italic params, syntax).
+
 ### 🔹 Step 29: Expert Color Recommendations
 - **Feature:** Built a library of curated palettes for Living Rooms, Bedrooms, and Offices.
 - **Integration:** One-tap navigation to try expert colors in the AR designer.
@@ -141,3 +148,8 @@
 ### 🔹 Step 30: High-Intelligence AI Agent (Gemini)
 - **Feature:** Integrated Google Gemini API for professional design conversation.
 - **Logic:** The AI is context-aware (reads user profile) and can suggest any hex color code.
+
+### 🔹 Step 31: Accuracy Optimization (Current Task)
+- **Goal:** Resolve detection issues for Wall and Floor surfaces.
+- **Method:** Implement Multi-Point Grid Sampling and Color Outlier Filtering in the local fallback engine.
+- **Expected Result:** More robust surface identification even with furniture or shadows present.

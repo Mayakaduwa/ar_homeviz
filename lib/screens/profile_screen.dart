@@ -147,9 +147,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         backgroundColor: Colors.blueAccent,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       ),
-                      child: _isSaving 
+                      child: _isSaving
                         ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text('SAVE CHANGES', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+                        : const Text('SAVE CHANGES', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
                     ),
                   ),
                   const SizedBox(height: 16),

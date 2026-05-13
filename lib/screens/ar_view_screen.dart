@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
@@ -10,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../services/ml_service.dart';
 import '../services/chat_service.dart';
 
@@ -17,7 +19,10 @@ import '../services/chat_service.dart';
 import '../main.dart' show cameras;
 
 class ARVisualizationScreen extends StatefulWidget {
-  const ARVisualizationScreen({super.key});
+  final File? initialImage;
+  final Color? initialColor;
+  
+  const ARVisualizationScreen({super.key, this.initialImage, this.initialColor});
 
   @override
   State<ARVisualizationScreen> createState() => _ARVisualizationScreenState();
@@ -34,6 +39,7 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
   bool _isCameraInitialized = false;
   bool _isLoading = true;
   bool _isProcessingML = false;
+  bool _isCapturing = false; // BUG-003: Guard against double-tap crash
 
   // -- Design State --
   double _intensity = 0.35;
@@ -54,39 +60,68 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialImage != null) {
+      _imageFile = widget.initialImage;
+    }
+    if (widget.initialColor != null) {
+      _baseColor = widget.initialColor!;
+    }
     _initializeHybridEngine();
   }
 
   Future<void> _initializeHybridEngine() async {
-    // Start loading the ML model in the background
+    setState(() => _isLoading = true);
+    
+    // Background prep
     _mlService.loadModel();
-    ChatService.loadModel(); // Load Recommendation Model (Objective 2)
+    ChatService.loadModel();
     
     try {
+      // Check AR Availability first
       bool arAvailable = await ArCoreController.checkArCoreAvailability();
       if (arAvailable) {
-        setState(() {
-          _isArSupported = true;
-          _isLoading = false;
-        });
-        return;
+        if (mounted) {
+          setState(() {
+            _isArSupported = true;
+            _isLoading = false;
+          });
+        }
+        return; // EXIT EARLY - Don't touch standard camera yet to avoid crash
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("AR Availability check error: $e");
+    }
+
+    // FALLBACK: If AR not supported or failed, start standard camera
     await _startStandardCamera();
+    
+    if (_imageFile != null && mounted) {
+      _processImageWithML(_imageFile!);
+    }
   }
 
   Future<void> _startStandardCamera() async {
     if (cameras.isEmpty) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       return;
     }
+    
+    // Ensure existing controller is disposed
+    if (_cameraController != null) {
+      await _cameraController!.dispose();
+      _cameraController = null;
+    }
+
     try {
       _cameraController = CameraController(
         cameras[0],
-        ResolutionPreset.medium, // lower res avoids OOM crash on older devices
+        ResolutionPreset.medium,
         enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
       );
+      
       await _cameraController!.initialize();
+      
       if (mounted) {
         setState(() {
           _isCameraInitialized = true;
@@ -94,6 +129,7 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
         });
       }
     } catch (e) {
+      debugPrint("Camera initialization error: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -103,10 +139,12 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
     _arCoreController?.dispose();
     _cameraController?.dispose();
     _mlService.dispose();
+    _chatController.dispose();
     super.dispose();
   }
 
   Future<void> _processImageWithML(File imageFile) async {
+    if (!mounted) return;
     setState(() => _isProcessingML = true);
     try {
       final bytes = await imageFile.readAsBytes();
@@ -118,28 +156,74 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
         });
       }
     } catch (e) {
+      debugPrint("ML Processing error: $e");
       if (mounted) setState(() => _isProcessingML = false);
     }
   }
 
   Future<void> _capturePhoto() async {
-    if (!_isCameraInitialized || _cameraController == null) return;
+    // BUG-003: Guard — block double-tap and concurrent calls
+    if (_isCapturing || _isProcessingML || _isLoading) return;
+    if (mounted) setState(() { _isCapturing = true; _isLoading = true; });
+
     try {
-      final XFile photo = await _cameraController!.takePicture();
-      if (mounted) {
-        final file = File(photo.path);
-        setState(() => _imageFile = file);
-        _processImageWithML(file);
+      // BUG-001: CASE 1 — AR mode: safely release camera before handing over
+      if (_isArSupported) {
+        // Dispose AR controller first to release Camera ID 0
+        _arCoreController?.dispose();
+        _arCoreController = null;
+        if (mounted) setState(() => _isArSupported = false);
+        
+        // Give Android Camera2 API time to fully release hardware lock
+        await Future.delayed(const Duration(milliseconds: 900));
+        
+        // Now it is safe to initialize standard camera
+        await _startStandardCamera();
       }
-    } catch (e) {}
+
+      // CASE 2: Standard Camera should now be ready
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        final XFile photo = await _cameraController!.takePicture();
+        if (mounted) {
+          final file = File(photo.path);
+          setState(() {
+            _imageFile = file;
+            _isLoading = false;
+            _isCapturing = false;
+          });
+          _processImageWithML(file);
+        }
+      } else {
+        // EMERGENCY FALLBACK: use system ImagePicker as last resort
+        if (mounted) setState(() { _isLoading = false; _isCapturing = false; });
+        final XFile? photo = await _picker.pickImage(source: ImageSource.gallery);
+        if (photo != null && mounted) {
+          final file = File(photo.path);
+          setState(() => _imageFile = file);
+          _processImageWithML(file);
+        }
+      }
+    } catch (e) {
+      debugPrint("Capture error prevented: $e");
+      if (mounted) setState(() { _isLoading = false; _isCapturing = false; });
+    }
+  }
+
+  Future<void> _saveAndFinish() async {
+    await _saveDesignToInternalStorage();
+    _goBack(); 
   }
 
   Future<void> _pickFromGallery() async {
-    final XFile? picked = await _picker.pickImage(source: ImageSource.gallery);
-    if (picked != null && mounted) {
-      final file = File(picked.path);
-      setState(() => _imageFile = file);
-      _processImageWithML(file);
+    try {
+      final XFile? picked = await _picker.pickImage(source: ImageSource.gallery);
+      if (picked != null && mounted) {
+        final file = File(picked.path);
+        setState(() => _imageFile = file);
+        _processImageWithML(file);
+      }
+    } catch (e) {
+      debugPrint("Gallery pick error: $e");
     }
   }
 
@@ -152,10 +236,15 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
 
   void _goBack() {
     if (_imageFile != null) {
+      // BUG-001: Reset capture guard and restart engine cleanly
       setState(() {
         _imageFile = null;
         _segmentationMask = null;
+        _isLoading = true;
+        _isCapturing = false;
+        _isCameraInitialized = false;
       });
+      _initializeHybridEngine();
     } else {
       Navigator.pop(context);
     }
@@ -170,12 +259,18 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
       _chatController.clear();
     });
 
-    final response = await ChatService.getAIResponse(text);
-    final suggestedColor = ChatService.detectColorInResponse(response);
+    try {
+      final response = await ChatService.getAIResponse(text, _messages);
+      final suggestedColor = ChatService.detectColorInResponse(response);
 
-    setState(() {
-      _messages.add(ChatMessage(text: response, isUser: false, suggestedColor: suggestedColor));
-    });
+      if (mounted) {
+        setState(() {
+          _messages.add(ChatMessage(text: response, isUser: false, suggestedColor: suggestedColor));
+        });
+      }
+    } catch (e) {
+      debugPrint("Chat error: $e");
+    }
   }
 
   @override
@@ -188,160 +283,168 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // --- LAYER 1: Background Content ---
-          isDesignMode
-              ? RepaintBoundary(
-                  key: _saveKey,
-                  child: InteractiveViewer(
-                    panEnabled: true,
-                    minScale: 0.8,
-                    maxScale: 5.0,
-                    child: Center(
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Image.file(_imageFile!, fit: BoxFit.contain),
-                          // ALWAYS show color overlay — switches to smart mask when ML is ready
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: _segmentationMask != null
-                                  ? CustomPaint(
-                                      painter: SegmentationPainter(
-                                        mask: _segmentationMask!,
-                                        color: overlayColor,
-                                        maskSize: _mlService.maskSize,
-                                      ),
-                                    )
-                                  : CustomPaint(
-                                      painter: FallbackOverlayPainter(
-                                        color: overlayColor,
-                                      ),
-                                    ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                )
-              : _buildViewport(),
+          // --- LAYER 1: Viewport ---
+          isDesignMode ? _buildDesignView(overlayColor) : _buildLiveView(),
 
-          // --- LAYER 2: ML Processing Overlay ---
-          if (_isProcessingML)
-            Container(
-              color: Colors.black54,
-              child: const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: Colors.blueAccent),
-                    SizedBox(height: 16),
-                    Text('AI is analyzing the wall...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
-            ),
+          // --- LAYER 2: Global Loaders ---
+          if (_isProcessingML || (_isLoading && isDesignMode))
+            _buildAILoader(),
 
-          // --- LAYER 3: TOP BAR ---
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.black87, Colors.transparent],
-                ),
-              ),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Row(
-                    children: [
-                      _topIconButton(
-                        icon: isDesignMode ? Icons.arrow_back_ios_new : Icons.close_rounded,
-                        onTap: _goBack,
-                      ),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.black45,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.white24),
-                        ),
-                        child: Text(
-                          isDesignMode ? 'PHOTO DESIGNER' : 'LIVE AI CAMERA',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
-                        ),
-                      ),
-                      const Spacer(),
-                      isDesignMode
-                          ? _topIconButton(icon: Icons.refresh_rounded, onTap: _resetDesign)
-                          : const SizedBox(width: 40),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black87],
-                ),
-              ),
-              padding: EdgeInsets.only(
-                top: 24, left: 16, right: 16,
-                bottom: MediaQuery.of(context).padding.bottom + 16,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _targetSelector(),
-                  const SizedBox(height: 14),
-                  _buildSlider(overlayColor),
-                  const SizedBox(height: 14),
-                  _buildColorPicker(),
-                  const SizedBox(height: 24),
-                  _buildActionRow(isDesignMode),
-                ],
-              ),
-            ),
-          ),
+          // --- LAYER 3: UI Controls ---
+          _buildTopBar(isDesignMode),
+          _buildBottomControls(isDesignMode, overlayColor),
 
-          // --- LAYER 5: CHAT PANEL (OVERLAY) ---
+          // --- LAYER 4: Chat ---
           if (_isChatOpen) _buildChatPanel(),
         ],
       ),
     );
   }
 
-  Widget _buildViewport() {
-    if (_isLoading) return const Center(child: CircularProgressIndicator(color: Colors.blueAccent));
-    if (_isArSupported) return ArCoreView(onArCoreViewCreated: (c) => _arCoreController = c, enablePlaneRenderer: true);
-    if (_isCameraInitialized && _cameraController != null) return CameraPreview(_cameraController!);
-    return const Center(child: Text('Camera not available', style: TextStyle(color: Colors.white38)));
+  Widget _buildLiveView() {
+    if (_isLoading && !_isCameraInitialized && !_isArSupported) {
+      return const Center(child: CircularProgressIndicator(color: Colors.blueAccent));
+    }
+    
+    if (_isArSupported) {
+      return ArCoreView(
+        onArCoreViewCreated: (c) => _arCoreController = c,
+        enablePlaneRenderer: true,
+      );
+    }
+    
+    if (_isCameraInitialized && _cameraController != null && _cameraController!.value.isInitialized) {
+      return CameraPreview(_cameraController!);
+    }
+    
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.videocam_off_rounded, color: Colors.white24, size: 48),
+          const SizedBox(height: 16),
+          Text('Camera starting...', style: GoogleFonts.outfit(color: Colors.white38)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesignView(Color overlayColor) {
+    return RepaintBoundary(
+      key: _saveKey,
+      child: InteractiveViewer(
+        panEnabled: true,
+        minScale: 0.8,
+        maxScale: 5.0,
+        child: Center(
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Image.file(_imageFile!, fit: BoxFit.contain),
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: _segmentationMask != null
+                      ? CustomPaint(
+                          painter: SegmentationPainter(
+                            mask: _segmentationMask!,
+                            color: overlayColor,
+                            maskSize: _mlService.maskSize,
+                          ),
+                        )
+                      : CustomPaint(
+                          painter: FallbackOverlayPainter(
+                            color: overlayColor,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAILoader() {
+    return Container(
+      color: Colors.black87,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(color: Colors.blueAccent, strokeWidth: 3),
+            const SizedBox(height: 24),
+            Text('AI IS ANALYZING YOUR WALL', 
+              style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+            const SizedBox(height: 8),
+            Text('Please stay still...', style: GoogleFonts.outfit(color: Colors.white38, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopBar(bool isDesignMode) {
+    return Positioned(
+      top: 0, left: 0, right: 0,
+      child: Container(
+        padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top + 8, left: 16, right: 16, bottom: 16),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent]),
+        ),
+        child: Row(
+          children: [
+            _topIconButton(
+              icon: isDesignMode ? Icons.arrow_back_ios_new : Icons.close_rounded,
+              onTap: _goBack,
+            ),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white24)),
+              child: Text(isDesignMode ? 'PHOTO DESIGNER' : 'LIVE AI CAMERA', 
+                style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1)),
+            ),
+            const Spacer(),
+            if (isDesignMode)
+              _topIconButton(icon: Icons.refresh_rounded, onTap: _resetDesign)
+            else
+              const SizedBox(width: 40),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomControls(bool isDesignMode, Color overlayColor) {
+    return Positioned(
+      bottom: 0, left: 0, right: 0,
+      child: Container(
+        padding: EdgeInsets.only(top: 24, left: 16, right: 16, bottom: MediaQuery.of(context).padding.bottom + 16),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black87]),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _targetSelector(),
+            const SizedBox(height: 14),
+            _buildSlider(overlayColor),
+            const SizedBox(height: 14),
+            _buildColorPicker(),
+            const SizedBox(height: 24),
+            _buildActionRow(isDesignMode),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _targetSelector() {
     return Container(
-      height: 40,
+      height: 38,
       padding: const EdgeInsets.symmetric(horizontal: 4),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.4),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white10),
-      ),
+      decoration: BoxDecoration(color: Colors.black.withOpacity(0.4), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white10)),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -358,44 +461,29 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
       onTap: () => setState(() => _currentTarget = target),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.blueAccent : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.white60,
-            fontSize: 12,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        decoration: BoxDecoration(color: isSelected ? Colors.blueAccent : Colors.transparent, borderRadius: BorderRadius.circular(16)),
+        child: Text(label, style: GoogleFonts.outfit(color: isSelected ? Colors.white : Colors.white60, fontSize: 12, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
       ),
     );
   }
 
   Widget _buildSlider(Color overlayColor) {
-    return Row(
-      children: [
-        const Icon(Icons.opacity_rounded, color: Colors.white54, size: 18),
-        Expanded(
-          child: Slider(
-            value: _intensity,
-            min: 0.0,
-            max: 1.0,
-            onChanged: (val) => setState(() => _intensity = val),
-            activeColor: overlayColor.withOpacity(1.0),
-          ),
-        ),
-        const Icon(Icons.format_paint_rounded, color: Colors.white54, size: 18),
-      ],
+    return SliderTheme(
+      data: SliderThemeData(trackHeight: 2, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6), overlayShape: const RoundSliderOverlayShape(overlayRadius: 14)),
+      child: Slider(
+        value: _intensity,
+        min: 0.0, max: 1.0,
+        onChanged: (val) => setState(() => _intensity = val),
+        activeColor: overlayColor.withOpacity(1.0),
+        inactiveColor: Colors.white10,
+      ),
     );
   }
 
   Widget _buildColorPicker() {
     return SizedBox(
-      height: 52,
+      height: 48,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: Colors.primaries.length,
@@ -405,12 +493,9 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
           return GestureDetector(
             onTap: () => setState(() => _baseColor = color),
             child: Container(
-              width: 46, height: 46,
-              margin: const EdgeInsets.symmetric(horizontal: 5),
-              decoration: BoxDecoration(
-                color: color, shape: BoxShape.circle,
-                border: Border.all(color: selected ? Colors.white : Colors.transparent, width: 3),
-              ),
+              width: 42, height: 42,
+              margin: const EdgeInsets.symmetric(horizontal: 6),
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: selected ? Colors.white : Colors.transparent, width: 2.5)),
             ),
           );
         },
@@ -422,16 +507,17 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        if (!isDesignMode)
-          _actionButton(icon: Icons.photo_library_rounded, label: 'GALLERY', onTap: _pickFromGallery)
-        else
-          _actionButton(icon: Icons.save_alt_rounded, label: 'SAVE', onTap: _saveDesignToInternalStorage),
+        _actionButton(
+          icon: isDesignMode ? Icons.refresh_rounded : Icons.photo_library_rounded,
+          label: isDesignMode ? 'RE-TAKE' : 'GALLERY',
+          onTap: isDesignMode ? _goBack : _pickFromGallery,
+        ),
         GestureDetector(
-          onTap: isDesignMode ? () {} : _capturePhoto,
+          onTap: isDesignMode ? _saveAndFinish : _capturePhoto,
           child: Container(
             width: 72, height: 72,
-            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3.5)),
-            child: Icon(isDesignMode ? Icons.check : Icons.camera_alt_rounded, color: Colors.white),
+            decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3), color: isDesignMode ? Colors.white12 : Colors.transparent),
+            child: Icon(isDesignMode ? Icons.check_circle_rounded : Icons.camera_alt_rounded, color: Colors.white, size: isDesignMode ? 44 : 30),
           ),
         ),
         _actionButton(
@@ -447,122 +533,117 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 40, height: 40,
-        decoration: BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-        child: Icon(icon, color: Colors.white, size: 20),
+        width: 38, height: 38,
+        decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+        child: Icon(icon, color: Colors.white, size: 18),
       ),
     );
   }
-
   Future<void> _saveDesignToInternalStorage() async {
-    try {
-      setState(() => _isProcessingML = true);
-      
-      // 1. Capture the boundary as an image
-      RenderRepaintBoundary boundary = _saveKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-      ui.Image image = await boundary.toImage(pixelRatio: 3.0); // High-res capture
-      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      Uint8List pngBytes = byteData!.buffer.asUint8List();
+    // BUG-002: Null safety check — if widget not rendered yet, bail gracefully
+    if (_saveKey.currentContext == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please wait for the design to load.'), backgroundColor: Colors.orange),
+        );
+      }
+      return;
+    }
 
-      // 2. Find/Create the local directory
+    if (mounted) setState(() => _isProcessingML = true);
+    try {
+      final RenderRepaintBoundary? boundary =
+          _saveKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) throw Exception('Render boundary not ready');
+
+      ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) throw Exception('Image byte conversion failed');
+      Uint8List pngBytes = byteData.buffer.asUint8List();
+
       final directory = await getApplicationDocumentsDirectory();
       final String designsPath = '${directory.path}/Designs';
       final designsDir = Directory(designsPath);
       if (!await designsDir.exists()) await designsDir.create(recursive: true);
 
-      // 3. Save the file
       final String fileName = 'Design_${DateTime.now().millisecondsSinceEpoch}.png';
       final File imgFile = File('$designsPath/$fileName');
       await imgFile.writeAsBytes(pngBytes);
 
-      // 4. Log metadata to Firebase Realtime Database
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
         await FirebaseDatabase.instance.ref('users/${user.uid}/history').push().set({
-          'imageName': fileName,
-          'localPath': imgFile.path,
-          'colorHex': _baseColor.value.toRadixString(16),
-          'target': _currentTarget.name,
-          'intensity': _intensity,
-          'timestamp': DateTime.now().millisecondsSinceEpoch,
+          'imageName': fileName, 'localPath': imgFile.path, 'colorHex': _baseColor.value.toRadixString(16),
+          'target': _currentTarget.name, 'intensity': _intensity, 'timestamp': DateTime.now().millisecondsSinceEpoch,
         });
       }
 
+      // BUG-007: Guard SnackBar with mounted check
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Design saved successfully!'),
-            backgroundColor: Colors.green[800],
-            duration: const Duration(seconds: 3),
-          ),
+          SnackBar(content: const Text('Design saved successfully! ✓'), backgroundColor: Colors.green[800], duration: const Duration(seconds: 3)),
         );
       }
     } catch (e) {
       debugPrint('Save error: $e');
+      // BUG-007: Guard catch-block SnackBar
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to save design.'), backgroundColor: Colors.redAccent),
+          const SnackBar(content: Text('Could not save design. Please try again.'), backgroundColor: Colors.redAccent),
         );
       }
     } finally {
+      // BUG-007: Guard finally block setState
       if (mounted) setState(() => _isProcessingML = false);
     }
   }
 
+
+
   Widget _actionButton({required IconData icon, required String label, required VoidCallback onTap}) {
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
-      child: Column(
-        children: [
-          Icon(icon, color: Colors.white),
-          const SizedBox(height: 4),
-          Text(label, style: const TextStyle(color: Colors.white, fontSize: 10)),
-        ],
+      child: SizedBox(
+        width: 60,
+        child: Column(
+          children: [
+            Icon(icon, color: Colors.white, size: 24),
+            const SizedBox(height: 6),
+            Text(label, style: GoogleFonts.outfit(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+          ],
+        ),
       ),
     );
   }
-
-  // --- CHAT COMPONENTS ---
 
   Widget _buildChatPanel() {
     return Positioned.fill(
       child: Stack(
         children: [
-          GestureDetector(
-            onTap: () => setState(() => _isChatOpen = false),
-            child: Container(color: Colors.black54),
-          ),
+          GestureDetector(onTap: () => setState(() => _isChatOpen = false), child: Container(color: Colors.black54)),
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
-              height: MediaQuery.of(context).size.height * 0.7,
+              height: MediaQuery.of(context).size.height * 0.75,
               width: double.infinity,
-              decoration: const BoxDecoration(
-                color: Color(0xFF1A1A1A),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-                boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 20)],
-              ),
+              decoration: const BoxDecoration(color: Color(0xFF141414), borderRadius: BorderRadius.vertical(top: Radius.circular(32)), boxShadow: [BoxShadow(color: Colors.black, blurRadius: 40)]),
               child: Column(
                 children: [
-                  Container(
-                    margin: const EdgeInsets.only(top: 12, bottom: 8),
-                    width: 40, height: 4,
-                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
-                  ),
+                  Container(margin: const EdgeInsets.only(top: 12, bottom: 8), width: 40, height: 4, decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(2))),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                     child: Row(
                       children: [
-                        const Text('AI INTERIOR DESIGNER', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                        Text('AI DESIGN ASSISTANT', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.2)),
                         const Spacer(),
                         _topIconButton(icon: Icons.close_rounded, onTap: () => setState(() => _isChatOpen = false)),
                       ],
                     ),
                   ),
-                  const Divider(color: Colors.white10),
+                  const Divider(color: Colors.white10, height: 1),
                   Expanded(
                     child: ListView.builder(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(24),
                       itemCount: _messages.length,
                       itemBuilder: (context, index) => _buildChatBubble(_messages[index]),
                     ),
@@ -581,40 +662,32 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
     return Align(
       alignment: msg.isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        padding: const EdgeInsets.all(14),
-        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+        margin: const EdgeInsets.only(bottom: 20),
+        padding: const EdgeInsets.all(16),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
         decoration: BoxDecoration(
-          color: msg.isUser ? Colors.blueAccent : Colors.white10,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(msg.isUser ? 16 : 0),
-            bottomRight: Radius.circular(msg.isUser ? 0 : 16),
-          ),
+          color: msg.isUser ? Colors.blueAccent : Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.only(topLeft: const Radius.circular(20), topRight: const Radius.circular(20), bottomLeft: Radius.circular(msg.isUser ? 20 : 0), bottomRight: Radius.circular(msg.isUser ? 0 : 20)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(msg.text, style: const TextStyle(color: Colors.white, fontSize: 13.5)),
+            Text(msg.text, style: GoogleFonts.outfit(color: Colors.white.withOpacity(0.9), fontSize: 14, height: 1.4)),
             if (msg.suggestedColor != null) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               InkWell(
                 onTap: () {
-                  setState(() {
-                    _baseColor = msg.suggestedColor!;
-                    _isChatOpen = false;
-                  });
+                  setState(() { _baseColor = msg.suggestedColor!; _isChatOpen = false; });
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white12)),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(width: 14, height: 14, decoration: BoxDecoration(color: msg.suggestedColor, shape: BoxShape.circle)),
-                      const SizedBox(width: 8),
-                      const Text('APPLY THIS COLOR', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                      Container(width: 16, height: 16, decoration: BoxDecoration(color: msg.suggestedColor, shape: BoxShape.circle)),
+                      const SizedBox(width: 10),
+                      Text('USE THIS COLOR', style: GoogleFonts.outfit(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
                     ],
                   ),
                 ),
@@ -628,28 +701,29 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
 
   Widget _buildChatInput() {
     return Container(
-      padding: EdgeInsets.fromLTRB(16, 8, 16, MediaQuery.of(context).padding.bottom + 16),
-      decoration: const BoxDecoration(color: Color(0xFF252525), border: Border(top: BorderSide(color: Colors.white10))),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, MediaQuery.of(context).padding.bottom + 20),
+      decoration: const BoxDecoration(color: Color(0xFF1A1A1A), border: Border(top: BorderSide(color: Colors.white10))),
       child: Row(
         children: [
           Expanded(
             child: TextField(
               controller: _chatController,
-              style: const TextStyle(color: Colors.white),
+              style: GoogleFonts.outfit(color: Colors.white),
               decoration: InputDecoration(
-                hintText: 'Ask for design advice...',
-                hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
-                filled: true, fillColor: Colors.white10,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(25), borderSide: BorderSide.none),
+                hintText: 'Describe your style...',
+                hintStyle: GoogleFonts.outfit(color: Colors.white24, fontSize: 14),
+                filled: true, fillColor: Colors.white.withOpacity(0.05),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(28), borderSide: BorderSide.none),
               ),
               onSubmitted: (_) => _sendMessage(),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           CircleAvatar(
+            radius: 24,
             backgroundColor: Colors.blueAccent,
-            child: IconButton(icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18), onPressed: _sendMessage),
+            child: IconButton(icon: const Icon(Icons.send_rounded, color: Colors.white, size: 20), onPressed: _sendMessage),
           ),
         ],
       ),
@@ -657,64 +731,35 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
   }
 }
 
-/// Custom Painter to draw the wall segmentation mask
 class SegmentationPainter extends CustomPainter {
   final List<Map<String, double>> mask;
   final Color color;
   final int maskSize;
-
   SegmentationPainter({required this.mask, required this.color, required this.maskSize});
-
   @override
   void paint(Canvas canvas, Size size) {
-    // USE BlendMode.softLight for realistic painting
-    final paint = Paint()
-      ..color = color
-      ..blendMode = BlendMode.softLight
-      ..style = PaintingStyle.fill;
-
+    final paint = Paint()..color = color..blendMode = BlendMode.softLight..style = PaintingStyle.fill;
     final double scaleX = size.width / maskSize;
     final double scaleY = size.height / maskSize;
-
-    // Drawing optimized segments instead of 66,000 pixels
     for (final segment in mask) {
       final double x = segment['x']! * scaleX;
       final double y = segment['y']! * scaleY;
       final double w = segment['w']! * scaleX;
-      
-      // Draw the horizontal segment
-      // Use +1.0 height to avoid horizontal gaps between rows
-      canvas.drawRect(
-        Rect.fromLTWH(x, y, w + 0.5, scaleY + 0.5),
-        paint,
-      );
+      canvas.drawRect(Rect.fromLTWH(x, y, w + 0.5, scaleY + 0.5), paint);
     }
   }
-
   @override
-  bool shouldRepaint(covariant SegmentationPainter oldDelegate) {
-    return oldDelegate.color != color || oldDelegate.mask != mask;
-  }
+  bool shouldRepaint(covariant SegmentationPainter oldDelegate) => oldDelegate.color != color || oldDelegate.mask != mask;
 }
 
-/// Fallback painter that colors the whole screen with SoftLight blend
 class FallbackOverlayPainter extends CustomPainter {
   final Color color;
-
   FallbackOverlayPainter({required this.color});
-
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..blendMode = BlendMode.softLight
-      ..style = PaintingStyle.fill;
-
+    final paint = Paint()..color = color..blendMode = BlendMode.softLight..style = PaintingStyle.fill;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
   }
-
   @override
-  bool shouldRepaint(covariant FallbackOverlayPainter oldDelegate) {
-    return oldDelegate.color != color;
-  }
+  bool shouldRepaint(covariant FallbackOverlayPainter oldDelegate) => oldDelegate.color != color;
 }
