@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'signup_screen.dart';
+import 'reset_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -94,6 +95,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 TextButton(
                   onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SignUpScreen())),
                   child: const Text("Don't have an account? Sign Up", style: TextStyle(color: Colors.blueAccent)),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ResetPasswordScreen())),
+                  child: Text('Forgot Password?', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)),
                 ),
               ],
             ),

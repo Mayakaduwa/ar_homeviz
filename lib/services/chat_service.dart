@@ -4,8 +4,10 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 
 class ChatMessage {
   final String text;
@@ -43,6 +45,13 @@ class ChatService {
   
   // REPLACE with your actual Gemini API Key
   static const String _kGeminiApiKey = 'REPLACE_WITH_YOUR_GEMINI_KEY';
+  
+  static const String _kSystemPrompt = 
+    "You are a friendly, professional AI interior designer. "
+    "Give very brief advice (maximum 2 sentences). "
+    "Always be helpful and creative. "
+    "Focus only on wall colors, palettes, room styles, and design advice. "
+    "If you suggest a specific color, include its hex code in format #RRGGBB.";
 
   static Future<void> loadModel() async {
     try {
@@ -67,33 +76,36 @@ class ChatService {
       'content': m.text,
     }).toList();
 
-    // BUG-004: System prompt — prevents Phi-3 from re-introducing itself or asking
-    // the same questions repeatedly
-    const String systemPrompt =
-      'You are an expert interior design AI assistant for the AR-HomeViz app. '
-      'The user is designing their home and wants color advice. '
-      'Never introduce yourself again. Never ask for the user name. '
-      'Keep all responses under 3 short sentences. '
-      'Focus only on wall colors, palettes, room styles, and design advice. '
-      'If you suggest a specific color, include its hex code in format #RRGGBB.';
-
     // --- TIER 1: KAGGLE/COLAB LLM (WITH SYSTEM PROMPT + HISTORY) ---
     if (!_kKaggleApiUrl.contains('YOUR_NGROK_ID')) {
       try {
-        final response = await http.post(
+        final httpClient = HttpClient()
+          ..badCertificateCallback = ((X509Certificate cert, String host, int port) => true)
+          ..connectionTimeout = const Duration(seconds: 15);
+        final ioClient = IOClient(httpClient);
+
+        final response = await ioClient.post(
           Uri.parse(_kKaggleApiUrl),
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+          },
           body: jsonEncode({
             'message': userMessage,
             'style': userStyle,
             'history': historyMap,
-            'system_prompt': systemPrompt, // BUG-004 fix
+            'system_prompt': _kSystemPrompt,
           }),
-        ).timeout(const Duration(seconds: 12));
-        
+        ).timeout(const Duration(seconds: 90)); // 90s - Better for Kaggle initialization
+
+        ioClient.close();
+
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
-          return data['response'] ?? "I'm thinking...";
+          String rawText = data['response'] ?? data['generated_text'] ?? "";
+          return _cleanResponse(rawText);
+        } else {
+          debugPrint('Kaggle Tier returned HTTP ${response.statusCode}');
         }
       } catch (e) {
         debugPrint('Kaggle Tier failed: $e');
@@ -123,31 +135,37 @@ class ChatService {
   /// BUG-004: Smart rule-based fallback that doesn't repeat questions
   static String _smartLocalFallback(String message) {
     final msg = message.toLowerCase();
+    
     if (msg.contains('hi') || msg.contains('hello') || msg.contains('hey')) {
       return "Great to chat! What room are you designing today — living room, bedroom, or something else?";
     }
-    if (msg.contains('wall') && (msg.contains('color') || msg.contains('colour'))) {
-      return "For walls, soft neutrals like warm white (#F5F0E8) or sage green (#8FAF8A) are trending. Would you like a full 5-color palette?";
+    
+    // Improved keyword detection to avoid the "Interesting challenge" repetition
+    if (msg.contains('living room') || msg.contains('bedroom') || msg.contains('kitchen') || msg.contains('room')) {
+      return "Got it! For a ${msg.contains('room') ? 'space like that' : msg}, would you prefer a warm, cool, or neutral tone for the walls?";
     }
-    if (msg.contains('floor')) {
-      return "For floors, warm oak tones or charcoal grey work beautifully. Try pairing with lighter walls for contrast.";
+
+    if (msg.contains('neutral') || msg.contains('cool') || msg.contains('warm')) {
+      String hex = "#F5F0E8"; // Neutral white
+      if (msg.contains('cool')) hex = "#B0C4DE"; // Light Steel Blue
+      if (msg.contains('warm')) hex = "#E2725B"; // Terracotta
+      
+      return "Excellent choice. $msg tones work well for balance. I suggest starting with a base like $hex. Would you like to see a full 5-color palette for this?";
     }
-    if (msg.contains('bedroom')) {
-      return "Bedrooms look stunning in soft blues (#B0C4DE) or lavender (#C8A2C8) — they promote relaxation and better sleep.";
+
+    if (msg.contains('yes') || msg.contains('palette') || msg.contains('recommend')) {
+      return "Here is a balanced palette for you: [0xFFF5F0E8], [0xFF8FAF8A], [0xFF36454F], [0xFF1B2A4A], and [0xFF2D6A6A]. Which one should we try in AR first?";
     }
-    if (msg.contains('living room') || msg.contains('lounge')) {
-      return "Living rooms shine in warm terracotta (#E2725B) or deep teal (#2D6A6A). Which mood are you going for — cozy or modern?";
+
+    if (msg.contains('wall') || msg.contains('color') || msg.contains('colour')) {
+      return "For walls, soft neutrals like sage green (#8FAF8A) are very popular right now. Do you want to see how it looks on your own wall?";
     }
-    if (msg.contains('modern') || msg.contains('minimal')) {
-      return "For a modern look, try crisp white (#FFFFFF) with charcoal grey (#36454F) accents. Add a bold accent wall in navy (#1B2A4A).";
-    }
-    if (msg.contains('recommend') || msg.contains('suggest') || msg.contains('palette')) {
-      return "I'd suggest Warm Neutrals: beige (#F5F5DC), taupe (#8B8680), cream (#FFFDD0), and warm white (#FAF9F6). Would you like to try this in AR?";
-    }
+
     if (msg.contains('save') || msg.contains('done') || msg.contains('finish')) {
       return "Tap the checkmark button at the bottom to save your design to your gallery!";
     }
-    return "That's an interesting design challenge! I'd focus on the wall color first — would you prefer a warm, cool, or neutral tone for this space?";
+
+    return "That's a unique style! Tell me more about the mood you want to create (e.g., calm, energetic, luxury).";
   }
 
   /// Multimodal chat for analyzing images (Gemini-only for now)
@@ -223,5 +241,27 @@ class ChatService {
     if (lower.contains('beige')) return const Color(0xFFF5F5DC);
     if (lower.contains('cream')) return const Color(0xFFFFFDD0);
     return null;
+  }
+
+  static String _cleanResponse(String text) {
+    if (text.isEmpty) return "I'm here to help with your design!";
+    
+    // Remove leaked prompt headers common in smaller models
+    String cleaned = text
+      .replaceAll(RegExp(r'^(You are a|System:|Assistant:)', caseSensitive: false), '')
+      .replaceAll(_kSystemPrompt, '')
+      .trim();
+
+    // If the model repeated the user's message at the start, try to strip it
+    if (cleaned.contains('hi Hello!') || cleaned.contains('hi hi')) {
+       cleaned = cleaned.split('!').last.trim();
+    }
+    
+    // Ensure it's not too long
+    if (cleaned.length > 300) {
+      cleaned = "${cleaned.substring(0, 297)}...";
+    }
+
+    return cleaned.isEmpty ? "How can I help you design your room today?" : cleaned;
   }
 }

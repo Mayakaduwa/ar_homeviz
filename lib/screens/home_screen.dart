@@ -6,6 +6,7 @@ import 'my_gallery_screen.dart';
 import 'profile_screen.dart';
 import 'recommendations_screen.dart';
 import 'chat_bot_screen.dart';
+import 'saved_palettes_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -106,6 +107,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     icon: Icons.palette_rounded,
                     color: Colors.greenAccent,
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecommendationsScreen())),
+                  ),
+                  _featureCard(
+                    title: 'Saved Palettes',
+                    subtitle: 'Your designs & palettes',
+                    icon: Icons.bookmark_rounded,
+                    color: Colors.amberAccent,
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SavedPalettesScreen())),
                   ),
                 ]),
               ),

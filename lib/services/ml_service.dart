@@ -1,7 +1,9 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:image/image.dart' as img;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'dart:convert';
 
 enum SegmentationTarget { wall, floor }
@@ -195,17 +197,36 @@ class MLService {
     // --- STEP A: TRY REMOTE AI (OBJECTIVE 1) ---
     try {
       print('🌐 Attempting Cloud AI (${target.name}) Segmentation...');
-      var request = http.MultipartRequest('POST', Uri.parse('$_kRemoteApiUrl/segment'));
-      request.fields['target'] = target.name;
-      request.files.add(http.MultipartFile.fromBytes('file', imageBytes, filename: 'input.jpg'));
-      
-      var streamedResponse = await request.send().timeout(const Duration(seconds: 8));
-      var response = await http.Response.fromStream(streamedResponse);
+
+      // FIX: Ngrok uses a wildcard SSL cert that Android's strict validator rejects.
+      // We create a custom HttpClient that bypasses certificate verification,
+      // identical to the fix in chat_service.dart.
+      final httpClient = HttpClient()
+        ..badCertificateCallback =
+            (X509Certificate cert, String host, int port) => true;
+      final ioClient = IOClient(httpClient);
+
+      final uri = Uri.parse('$_kRemoteApiUrl/segment');
+      final request = http.MultipartRequest('POST', uri)
+        ..headers['ngrok-skip-browser-warning'] = 'true'  // bypass Ngrok interstitial page
+        ..fields['target'] = target.name
+        ..files.add(
+            http.MultipartFile.fromBytes('file', imageBytes, filename: 'input.jpg'));
+
+      // Merge the request into an IOClient-aware send
+      final streamedResponse = await ioClient
+          .send(request)
+          .timeout(const Duration(seconds: 30)); // 30s — model inference takes time
+      final response = await http.Response.fromStream(streamedResponse);
+      ioClient.close();
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List<dynamic> rawMask = data['mask'];
+        print('✅ Cloud AI segmentation succeeded (${target.name})');
         return _processRemoteMask(rawMask, target);
+      } else {
+        print('⚠️ Cloud AI returned HTTP ${response.statusCode}');
       }
     } catch (e) {
       print('⚠️ Cloud AI unavailable (using local fallback): $e');

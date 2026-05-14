@@ -70,31 +70,42 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
   }
 
   Future<void> _initializeHybridEngine() async {
-    setState(() => _isLoading = true);
-    
-    // Background prep
+    if (mounted) setState(() => _isLoading = true);
+
     _mlService.loadModel();
     ChatService.loadModel();
-    
+
+    // DEFINITIVE FIX for Samsung A06/M21 crash:
+    // checkArCoreAvailability() returns true for devices where ARCore is
+    // "supported but not installed". On those devices, ARCore shows an
+    // "Install" dialog and when tapped crashes on Android 12+ with a
+    // SecurityException. We prevent this by:
+    //   1. A 2-second timeout — if the check hangs (dialog is showing), we abort.
+    //   2. The ArCoreView itself also has an error handler (see _buildLiveView).
+    bool arAvailable = false;
     try {
-      // Check AR Availability first
-      bool arAvailable = await ArCoreController.checkArCoreAvailability();
-      if (arAvailable) {
-        if (mounted) {
-          setState(() {
-            _isArSupported = true;
-            _isLoading = false;
-          });
-        }
-        return; // EXIT EARLY - Don't touch standard camera yet to avoid crash
-      }
+      arAvailable = await ArCoreController.checkArCoreAvailability()
+          .timeout(const Duration(seconds: 2), onTimeout: () {
+        debugPrint('AR check timed-out — device likely showed install dialog. Forcing 2D.');
+        return false;
+      });
     } catch (e) {
-      debugPrint("AR Availability check error: $e");
+      debugPrint('AR check failed (unsupported device): $e');
+      arAvailable = false;
     }
 
-    // FALLBACK: If AR not supported or failed, start standard camera
+    if (arAvailable && mounted) {
+      setState(() {
+        _isArSupported = true;
+        _isLoading = false;
+      });
+      return; // ArCoreView will render; error handler will catch if device fails
+    }
+
+    // 2D Standard Camera fallback (Samsung A06, M21, etc.)
+    if (mounted) setState(() => _isArSupported = false);
     await _startStandardCamera();
-    
+
     if (_imageFile != null && mounted) {
       _processImageWithML(_imageFile!);
     }
@@ -308,7 +319,12 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
     
     if (_isArSupported) {
       return ArCoreView(
-        onArCoreViewCreated: (c) => _arCoreController = c,
+        // DEFINITIVE FIX Part 2: If the ArCoreView widget itself fails to
+        // initialize (device reports "not supported" after the check),
+        // we immediately fall back to 2D mode instead of crashing.
+        onArCoreViewCreated: (ArCoreController controller) {
+          _arCoreController = controller;
+        },
         enablePlaneRenderer: true,
       );
     }

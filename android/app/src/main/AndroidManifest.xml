@@ -3,18 +3,22 @@
     <!-- Camera permission for AR -->
     <uses-permission android:name="android.permission.CAMERA" />
 
-    <!-- ARCore requires at least SDK 24 -->
-    <uses-feature android:name="android.hardware.camera.ar" android:required="true" />
+    <!-- AR is OPTIONAL — app works on non-AR devices in 2D mode.
+         Setting required=false prevents the Play Store from filtering out
+         non-AR devices AND prevents the forced install dialog on Samsung A06/M21. -->
+    <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
 
     <application
         android:label="AR-HomeViz"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
-        <!-- ARCore meta-data: Using tools:replace to override plugin's 'optional' value -->
+        <!-- ARCore meta-data: 'optional' means the app works without ARCore.
+             AR devices get the full AR experience. Non-AR devices (Samsung A06, M21)
+             skip AR and use standard camera mode. -->
         <meta-data 
             android:name="com.google.ar.core" 
-            android:value="required" 
+            android:value="optional" 
             tools:replace="android:value" />
 
         <activity
