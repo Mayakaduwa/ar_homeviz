@@ -8,6 +8,7 @@ import 'package:http/io_client.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
+import 'user_preferences_service.dart';
 
 class ChatMessage {
   final String text;
@@ -103,7 +104,12 @@ class ChatService {
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
           String rawText = data['response'] ?? data['generated_text'] ?? "";
-          return _cleanResponse(rawText);
+          String cleaned = _cleanResponse(rawText);
+          
+          // AUTO-LEARN: Save preferences from AI response
+          UserPreferencesService.updateFromText(cleaned);
+          
+          return cleaned;
         } else {
           debugPrint('Kaggle Tier returned HTTP ${response.statusCode}');
         }
@@ -194,6 +200,10 @@ class ChatService {
   static Future<void> saveMessage(ChatMessage message) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+
+    // AUTO-LEARN: Save preferences from user message
+    UserPreferencesService.updateFromText(message.text);
+
     await FirebaseDatabase.instance.ref('users/${user.uid}/chats').push().set(message.toJson());
   }
 

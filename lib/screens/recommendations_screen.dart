@@ -4,6 +4,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'ar_view_screen.dart';
+import '../services/user_preferences_service.dart';
 
 // ─── Color Theory Palette Data ────────────────────────────────────────────────
 const _kRoomTypes = ['Living Room', 'Bedroom', 'Kitchen', 'Office', 'Dining Room', 'Kids Room'];
@@ -95,6 +96,22 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
   String _mood = 'Calm';
   String _familyKey = 'blues';
   bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStoredPreferences();
+  }
+
+  Future<void> _loadStoredPreferences() async {
+    final prefs = await UserPreferencesService.getPreferences();
+    if (mounted) {
+      setState(() {
+        if (prefs['roomType'] != null) _roomType = prefs['roomType']!;
+        if (prefs['mood'] != null) _mood = prefs['mood']!;
+      });
+    }
+  }
 
   List<Color> get _palette {
     final moodMap = _kPalettes[_mood] ?? _kPalettes['Calm']!;

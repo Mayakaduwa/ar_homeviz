@@ -43,6 +43,7 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
 
   // -- Design State --
   double _intensity = 0.35;
+  double _smoothness = 3.0; // Feathering amount
   Color _baseColor = Colors.blueAccent;
   File? _imageFile;
   List<Map<String, double>>? _segmentationMask;
@@ -365,6 +366,7 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
                             mask: _segmentationMask!,
                             color: overlayColor,
                             maskSize: _mlService.maskSize,
+                            smoothness: _smoothness,
                           ),
                         )
                       : CustomPaint(
@@ -445,7 +447,9 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
           children: [
             _targetSelector(),
             const SizedBox(height: 14),
-            _buildSlider(overlayColor),
+            _buildSlider(overlayColor, 'INTENSITY', _intensity, (v) => setState(() => _intensity = v)),
+            const SizedBox(height: 10),
+            _buildSlider(overlayColor, 'SMOOTHNESS', _smoothness / 10.0, (v) => setState(() => _smoothness = v * 10.0)),
             const SizedBox(height: 14),
             _buildColorPicker(),
             const SizedBox(height: 24),
@@ -484,16 +488,31 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
     );
   }
 
-  Widget _buildSlider(Color overlayColor) {
-    return SliderTheme(
-      data: SliderThemeData(trackHeight: 2, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6), overlayShape: const RoundSliderOverlayShape(overlayRadius: 14)),
-      child: Slider(
-        value: _intensity,
-        min: 0.0, max: 1.0,
-        onChanged: (val) => setState(() => _intensity = val),
-        activeColor: overlayColor.withOpacity(1.0),
-        inactiveColor: Colors.white10,
-      ),
+  Widget _buildSlider(Color color, String label, double value, ValueChanged<double> onChanged) {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: GoogleFonts.outfit(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+            Text('${(value * 100).toInt()}%', style: GoogleFonts.outfit(color: Colors.white38, fontSize: 10)),
+          ],
+        ),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 2,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+            activeTrackColor: color,
+            inactiveTrackColor: Colors.white10,
+            thumbColor: Colors.white,
+          ),
+          child: Slider(
+            value: value,
+            onChanged: onChanged,
+          ),
+        ),
+      ],
     );
   }
 
@@ -751,21 +770,45 @@ class SegmentationPainter extends CustomPainter {
   final List<Map<String, double>> mask;
   final Color color;
   final int maskSize;
-  SegmentationPainter({required this.mask, required this.color, required this.maskSize});
+  final double smoothness;
+  
+  SegmentationPainter({
+    required this.mask, 
+    required this.color, 
+    required this.maskSize,
+    required this.smoothness,
+  });
+
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color..blendMode = BlendMode.softLight..style = PaintingStyle.fill;
+    final paint = Paint()
+      ..color = color
+      ..blendMode = BlendMode.softLight
+      ..style = PaintingStyle.fill;
+    
+    // VISUAL POLISH: Apply Gaussian Blur to the edges
+    if (smoothness > 0) {
+      paint.maskFilter = MaskFilter.blur(BlurStyle.normal, smoothness);
+    }
+
     final double scaleX = size.width / maskSize;
     final double scaleY = size.height / maskSize;
+    
     for (final segment in mask) {
       final double x = segment['x']! * scaleX;
       final double y = segment['y']! * scaleY;
       final double w = segment['w']! * scaleX;
-      canvas.drawRect(Rect.fromLTWH(x, y, w + 0.5, scaleY + 0.5), paint);
+      
+      // Draw slightly larger rect to prevent gaps between segments
+      canvas.drawRect(Rect.fromLTWH(x - 0.5, y - 0.5, w + 1.0, scaleY + 1.0), paint);
     }
   }
+
   @override
-  bool shouldRepaint(covariant SegmentationPainter oldDelegate) => oldDelegate.color != color || oldDelegate.mask != mask;
+  bool shouldRepaint(covariant SegmentationPainter oldDelegate) => 
+      oldDelegate.color != color || 
+      oldDelegate.mask != mask || 
+      oldDelegate.smoothness != smoothness;
 }
 
 class FallbackOverlayPainter extends CustomPainter {
