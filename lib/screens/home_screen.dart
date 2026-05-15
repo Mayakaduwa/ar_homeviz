@@ -7,6 +7,7 @@ import 'profile_screen.dart';
 import 'recommendations_screen.dart';
 import 'chat_bot_screen.dart';
 import 'saved_palettes_screen.dart';
+import '../services/ml_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -96,26 +97,45 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   _featureCard(
                     title: 'My Gallery',
-                    subtitle: 'View your saved designs',
-                    icon: Icons.photo_library_rounded,
-                    color: Colors.orangeAccent,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MyGalleryScreen())),
-                  ),
-                  _featureCard(
-                    title: 'Color Palettes',
-                    subtitle: 'Smart recommendations',
-                    icon: Icons.palette_rounded,
-                    color: Colors.greenAccent,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecommendationsScreen())),
-                  ),
-                  _featureCard(
-                    title: 'Saved Palettes',
-                    subtitle: 'Your designs & palettes',
+                    subtitle: 'Designs & Palettes',
                     icon: Icons.bookmark_rounded,
                     color: Colors.amberAccent,
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SavedPalettesScreen())),
                   ),
+                  _featureCard(
+                    title: 'Color Palettes',
+                    subtitle: 'AI recommendations',
+                    icon: Icons.palette_rounded,
+                    color: Colors.greenAccent,
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecommendationsScreen())),
+                  ),
                 ]),
+              ),
+            ),
+
+            // --- Model Selection Toggle ---
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.blueAccent.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.blueAccent.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.settings_suggest_rounded, color: Colors.blueAccent, size: 20),
+                      const SizedBox(width: 12),
+                      const Text('ML Engine:', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+                      const Spacer(),
+                      _versionToggle(1),
+                      const SizedBox(width: 8),
+                      _versionToggle(2),
+                    ],
+                  ),
+                ),
               ),
             ),
 
@@ -218,6 +238,28 @@ class _HomeScreenState extends State<HomeScreen> {
         child: const CircleAvatar(
           backgroundColor: Color(0xFF1E293B),
           child: Icon(Icons.person, color: Colors.white),
+        ),
+      ),
+    );
+  }
+
+  Widget _versionToggle(int version) {
+    final isSelected = MLService().currentModelVersion == version;
+    return GestureDetector(
+      onTap: () => setState(() => MLService().setModelVersion(version)),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.blueAccent : Colors.white10,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          'v$version',
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.white38,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
     );

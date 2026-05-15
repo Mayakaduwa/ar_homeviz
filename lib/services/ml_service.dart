@@ -1,5 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:flutter/material.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -171,7 +173,25 @@ double _median(List<double> v) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class MLService {
+  // Singleton pattern
+  static final MLService _instance = MLService._internal();
+  factory MLService() => _instance;
+  MLService._internal();
+
   bool _isReady = false;
+  Interpreter? _segmentationInterpreter;
+  Interpreter? _recommendationInterpreter;
+  int _currentModelVersion = 2; // Default to v2 as requested
+
+  /// Switch between model versions (1 or 2)
+  void setModelVersion(int version) {
+    if (version == _currentModelVersion) return;
+    _currentModelVersion = version;
+    _isReady = false;
+    loadModel(); // Reload with new version
+  }
+
+  int get currentModelVersion => _currentModelVersion;
 
   /// Public maskSize that the painter uses for coordinate scaling.
   static const int _kMaskSize = 128;
@@ -182,11 +202,25 @@ class MLService {
   bool get isModelLoaded => _isReady;
   int get maskSize => _kMaskSize;
 
-  /// No model file needed — just marks the service ready immediately.
-  Future<void> loadModel() async {
-    _isReady = true;
-    print('✅ MLService ready — colour-based wall detector (maskSize=$_kMaskSize)');
+  /// Loads the TFLite models into memory for local inference
+  Future<void> _loadModel() async {
+    try {
+      String modelFile = _currentModelVersion == 1 
+          ? 'assets/models/deeplabv3_plus_wall_v1.tflite'
+          : 'assets/models/deeplabv3_plus_wall_v2.tflite';
+          
+      _segmentationInterpreter = await Interpreter.fromAsset(modelFile);
+      _recommendationInterpreter = await Interpreter.fromAsset('assets/models/color_reco_model.tflite');
+      
+      _isReady = true;
+      debugPrint('✅ MLService: Model v$_currentModelVersion Loaded Successfully.');
+    } catch (e) {
+      debugPrint('⚠️ MLService: Error loading Model v$_currentModelVersion: $e');
+      _isReady = true;
+    }
   }
+
+  Future<void> loadModel() => _loadModel();
 
   Future<List<Map<String, double>>?> segmentWall(
     Uint8List imageBytes, {
@@ -194,7 +228,7 @@ class MLService {
   }) async {
     if (!_isReady) return null;
 
-    // --- STEP A: TRY REMOTE AI (OBJECTIVE 1) ---
+    // --- STEP A: TRY REMOTE AI (CLOUD) ---
     try {
       print('🌐 Attempting Cloud AI (${target.name}) Segmentation...');
 
@@ -229,10 +263,45 @@ class MLService {
         print('⚠️ Cloud AI returned HTTP ${response.statusCode}');
       }
     } catch (e) {
-      print('⚠️ Cloud AI unavailable (using local fallback): $e');
+      print('⚠️ Cloud AI unavailable (trying local TFLite): $e');
     }
 
-    // --- STEP B: LOCAL FALLBACK (COLOUR-BASED) ---
+    // --- STEP B: LOCAL TFLITE AI (NEW - 6MB MODEL) ---
+    if (_segmentationInterpreter != null) {
+      try {
+        print('🤖 Running Local TFLite AI Segmentation (512x512)...');
+        
+        // 1. Preprocess: Decode and Resize to 512x512
+        final img.Image? decoded = img.decodeImage(imageBytes);
+        if (decoded != null) {
+          final img.Image resized = img.copyResize(decoded, width: 512, height: 512);
+          
+          // 2. Normalize and flatten to [1, 512, 512, 3]
+          var input = List.filled(1 * 512 * 512 * 3, 0.0).reshape([1, 512, 512, 3]);
+          for (int y = 0; y < 512; y++) {
+            for (int x = 0; x < 512; x++) {
+              final pixel = resized.getPixel(x, y);
+              input[0][y][x][0] = pixel.r / 255.0;
+              input[0][y][x][1] = pixel.g / 255.0;
+              input[0][y][x][2] = pixel.b / 255.0;
+            }
+          }
+
+          // 3. Prepare output: [1, 512, 512, 3]
+          var output = List.filled(1 * 512 * 512 * 3, 0.0).reshape([1, 512, 512, 3]);
+          
+          // 4. Run Inference
+          _segmentationInterpreter!.run(input, output);
+          
+          // 5. Process Output into 128x128 mask for display
+          return _processTFLiteOutput(output, target);
+        }
+      } catch (e) {
+        print('⚠️ Local TFLite Inference failed: $e');
+      }
+    }
+
+    // --- STEP C: LOCAL FALLBACK (HEURISTIC) ---
     try {
       final result = await compute(_colorSegmentIsolate, {
         'imageBytes': imageBytes,
@@ -253,6 +322,50 @@ class MLService {
       print('❌ Local detection error: $e');
       return null;
     }
+  }
+
+  /// Processes TFLite output [1, 512, 512, 3] into segments
+  List<Map<String, double>> _processTFLiteOutput(List<dynamic> output, SegmentationTarget target) {
+    final List<Map<String, double>> segments = [];
+    
+    // We downsample the 512 resolution to 128 for UI performance
+    const int modelRes = 512;
+    const int displayRes = _kMaskSize; // 128
+    final double step = modelRes / displayRes;
+
+    int targetClass = (target == SegmentationTarget.wall) ? 1 : 2;
+
+    for (int y = 0; y < displayRes; y++) {
+      int? startX;
+      for (int x = 0; x < displayRes; x++) {
+        final int py = (y * step).toInt().clamp(0, modelRes - 1);
+        final int px = (x * step).toInt().clamp(0, modelRes - 1);
+        
+        // Argmax: Find which class has highest probability
+        double maxProb = -1.0;
+        int maxClass = 0;
+        for (int c = 0; c < 3; c++) {
+          double prob = output[0][py][px][c];
+          if (prob > maxProb) {
+            maxProb = prob;
+            maxClass = c;
+          }
+        }
+        
+        bool isTarget = (maxClass == targetClass);
+
+        if (isTarget && startX == null) {
+          startX = x;
+        } else if (!isTarget && startX != null) {
+          segments.add({'x': startX.toDouble(), 'y': y.toDouble(), 'w': (x - startX).toDouble()});
+          startX = null;
+        }
+      }
+      if (startX != null) {
+        segments.add({'x': startX.toDouble(), 'y': y.toDouble(), 'w': (displayRes - startX).toDouble()});
+      }
+    }
+    return segments;
   }
 
   /// Converts a 2D grid mask from the server into optimized horizontal segments
@@ -295,7 +408,36 @@ class MLService {
     return segments;
   }
 
+  // ─── Neural Color Recommendation (TFLite) ──────────────────────────────────
+  
+  /// Uses the trained neural network (color_reco_model.tflite) to predict mood from color
+  Future<int?> predictMood(Color color) async {
+    if (_recommendationInterpreter == null) return null;
+    
+    try {
+      // Input: [R, G, B] normalized to 0.0 - 1.0
+      var input = [
+        [color.red / 255.0, color.green / 255.0, color.blue / 255.0]
+      ];
+      
+      // Output: Probabilities for 3 moods [0:Modern, 1:Warm, 2:Calm]
+      var output = List.filled(1 * 3, 0.0).reshape([1, 3]);
+      
+      _recommendationInterpreter!.run(input, output);
+      
+      List<double> probabilities = List<double>.from(output[0]);
+      int predictedIndex = probabilities.indexOf(probabilities.reduce(math.max));
+      
+      return predictedIndex;
+    } catch (e) {
+      debugPrint('Neural Inference Error: $e');
+      return null;
+    }
+  }
+
   void dispose() {
+    _segmentationInterpreter?.close();
+    _recommendationInterpreter?.close();
     _isReady = false;
   }
 }

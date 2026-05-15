@@ -5,6 +5,8 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'ar_view_screen.dart';
 import '../services/user_preferences_service.dart';
+import '../services/ml_service.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 // ─── Color Theory Palette Data ────────────────────────────────────────────────
 const _kRoomTypes = ['Living Room', 'Bedroom', 'Kitchen', 'Office', 'Dining Room', 'Kids Room'];
@@ -92,6 +94,7 @@ class RecommendationsScreen extends StatefulWidget {
 }
 
 class _RecommendationsScreenState extends State<RecommendationsScreen> {
+  final MLService _mlService = MLService();
   String _roomType = 'Living Room';
   String _mood = 'Calm';
   String _familyKey = 'blues';
@@ -271,6 +274,8 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
               ),
             ),
             const SizedBox(height: 28),
+            _buildAIAnalysis(palette[0]),
+            const SizedBox(height: 24),
 
             // ── Palette Result ─────────────────────────────────────────────
             _sectionLabel('YOUR 5-COLOUR PALETTE'),
@@ -392,6 +397,70 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
           ),
         );
       }).toList(),
+    );
+  }
+
+  Widget _buildAIAnalysis(Color selectedColor) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.psychology_outlined, color: Colors.blueAccent, size: 24),
+              const SizedBox(width: 12),
+              Text('NEURAL NETWORK ANALYSIS', 
+                style: GoogleFonts.outfit(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          FutureBuilder<int?>(
+            key: ValueKey(selectedColor),
+            future: _mlService.predictMood(selectedColor),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8.0),
+                  child: LinearProgressIndicator(
+                    backgroundColor: Colors.white10,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+                  ),
+                );
+              }
+              
+              final moodIdx = snapshot.data;
+              final moodNames = ['MODERN', 'WARM', 'CALM'];
+              final predictedMood = moodIdx != null ? moodNames[moodIdx] : 'NOT DETECTED';
+              
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Neural Classification:', style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.blueAccent.withOpacity(0.2), 
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blueAccent.withOpacity(0.5)),
+                    ),
+                    child: Text(predictedMood, style: GoogleFonts.outfit(
+                      color: Colors.white, 
+                      fontWeight: FontWeight.bold, 
+                      fontSize: 12,
+                      letterSpacing: 0.5,
+                    )),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 }

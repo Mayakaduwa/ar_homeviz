@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'screens/auth/auth_loading_screen.dart';
+import 'services/ml_service.dart';
 
 // Global list of cameras discovered on startup
 List<CameraDescription> cameras = [];
@@ -26,6 +27,9 @@ void main() async {
   } catch (e) {
     debugPrint("Could not find cameras: $e");
   }
+
+  // Initialize AI Models
+  await MLService().loadModel();
 
   // Make the status bar transparent for a full-screen immersive look
   SystemChrome.setSystemUIOverlayStyle(
