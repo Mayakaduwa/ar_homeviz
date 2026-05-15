@@ -1,77 +1,98 @@
 ========================================================================
              AR-HOMEVIZ: ML-INTEGRATED INTERIOR DESIGNER
-                       CLIENT HANDOFF & RUNNING GUIDE
+                 COMPLETE SETUP & DEPLOYMENT MANUAL
 ========================================================================
 
-Project Overview:
-AR-HomeViz is a professional interior design application that uses 
-Augmented Reality (AR) and Artificial Intelligence (AI) to help users 
-visualize wall colors in real-time.
+Welcome! This guide will help you install the development environment 
+and run the AR-HomeViz app on Windows, Linux, and Android.
 
 ------------------------------------------------------------------------
-STEP 1: PREREQUISITES (FOR LAPTOP)
+PART 1: INSTALLING FLUTTER (THE "ENGINE")
 ------------------------------------------------------------------------
-1. Flutter SDK: Installed and added to PATH.
-2. Android Studio: Installed with 'Android SDK' and 'Command-line Tools'.
-3. VS Code: (Optional) with Flutter & Dart extensions.
-4. Kaggle Account: Required to run the high-power AI "Brain".
+
+FOR WINDOWS USERS:
+1. Download Flutter: https://docs.flutter.dev/get-started/install/windows
+2. Extract the .zip file to 'C:\src\flutter'.
+3. Update PATH: Search for "Edit the system environment variables" in 
+   Windows, click 'Environment Variables', find 'Path', and add: 
+   C:\src\flutter\bin
+4. Install Android Studio: https://developer.android.com/studio
+   - During setup, install 'Android SDK' and 'Android Virtual Device'.
+
+FOR LINUX USERS:
+1. Open Terminal and run:
+   $ sudo apt update && sudo apt install -y git curl unzip xz-utils zip
+2. Download Flutter and extract it to ~/development/flutter.
+3. Add to PATH in ~/.bashrc:
+   export PATH="$PATH:$HOME/development/flutter/bin"
+4. Reload: $ source ~/.bashrc
+
+VERIFY INSTALLATION:
+- Open a terminal/command prompt and type:
+  $ flutter doctor
+- Ensure there are green checkmarks (X's are okay for now as long as 
+  Android is green).
 
 ------------------------------------------------------------------------
-STEP 2: STARTING THE AI "BRAIN" (KAGGLE)
+PART 2: SETTING UP VS CODE (THE "EDITOR")
 ------------------------------------------------------------------------
-The app uses a Hybrid AI architecture. To enable the Smart Chat and 
-Advanced Mood Analysis:
-
-1. Log into Kaggle.com and open the 'AR-HomeViz-Brain' notebook.
-2. Ensure GPU is enabled (Settings > Accelerator > GPU T4 x2).
-3. Copy the 'Phi-3 ML Server' script into a cell.
-4. Run the cell. Wait for the "🚀 STABLE URL" (Ngrok URL) to appear.
-5. In the Flutter project, update the URLs in:
-   - lib/services/chat_service.dart (kKaggleApiUrl)
-   - lib/services/ml_service.dart (kRemoteApiUrl)
+1. Download VS Code: https://code.visualstudio.com/
+2. Open VS Code and click the 'Extensions' icon (square icon on left).
+3. Search for "Flutter" and click Install. (This also installs Dart).
+4. OPEN THE PROJECT:
+   - Go to File > Open Folder.
+   - Select the 'ar_homeviz' folder you received.
+5. In the bottom right of VS Code, click "No Device" or a device name to 
+   select your phone or an emulator.
 
 ------------------------------------------------------------------------
-STEP 3: RUNNING ON AN ANDROID PHONE (RECOMMENDED)
+PART 3: STARTING THE AI "BRAIN" (KAGGLE)
 ------------------------------------------------------------------------
-For the best experience (AR and Camera features):
-
-1. Connect the Android phone via USB.
-2. Enable 'Developer Options' and 'USB Debugging' on the phone.
-3. In the project terminal, run:
-   $ flutter pub get
-   $ flutter run --release
-
-Note: If the device does not support ARCore (like Samsung A06), the app 
-will automatically switch to "Standard Vision Mode" for wall coloring.
-
-------------------------------------------------------------------------
-STEP 4: RUNNING ON LAPTOP (EMULATOR)
-------------------------------------------------------------------------
-1. Open Android Studio > Device Manager.
-2. Start a "Pixel" or "Nexus" Virtual Device.
-3. Once the emulator is running, in the terminal run:
-   $ flutter run
-4. Note: Camera/AR features will use the laptop's webcam or a simulated 
-   room.
+To enable Chat and AI Analysis, the remote server must be running:
+1. Open Kaggle.com and log in.
+2. Create a new Notebook and paste the provided 'Kaggle Python Script'.
+3. In 'Settings', set 'Accelerator' to 'GPU T4 x2'.
+4. Click 'Run All'.
+5. Look for the message: "🚀 STABLE URL: https://xxxx.ngrok-free.dev"
+6. In VS Code, go to:
+   - lib/services/chat_service.dart -> Update _kKaggleApiUrl
+   - lib/services/ml_service.dart -> Update _kRemoteApiUrl
 
 ------------------------------------------------------------------------
-KEY FEATURES TO TEST
+PART 4: RUNNING THE APP ON A PHONE
 ------------------------------------------------------------------------
-1. AI DECOR AGENT: Ask for room advice. It remembers previous messages!
-2. COLOR RECOMMENDATIONS: Choose 'Neutrals'. Notice how colors shift 
-   when you change the 'Room Type' (Office vs Bedroom).
-3. NEURAL ANALYSIS: Watch the "Neural Network Analysis" card classify 
-   your colors as Modern, Warm, or Calm.
-4. AR VIEW: Capture a photo of a wall and tap to change its color 
-   instantly using on-device ML segmentation.
+1. Connect your Android phone to the laptop via USB.
+2. Enable USB Debugging on your phone:
+   - Settings > About Phone > Tap 'Build Number' 7 times.
+   - Settings > Developer Options > Enable 'USB Debugging'.
+3. In VS Code, press 'F5' to start the app.
+4. The first run takes 2-5 minutes to build.
 
 ------------------------------------------------------------------------
-TECHNICAL NOTES
+PART 5: HOW TO EXPORT THE APK (FOR INSTALLATION)
 ------------------------------------------------------------------------
-- Minimum Android API: 24 (Android 7.0)
-- Target Android API: 34 (Android 14)
-- ML Engine: TFLite (Local) + Phi-3 (Remote Fallback)
-- Authentication/Storage: Google Firebase
+If you want to create a file you can send to others to install:
+1. Open the Terminal in VS Code (Ctrl + `).
+2. Type the following command:
+   $ flutter build apk --release
+3. Once finished, find the file at:
+   build/app/outputs/flutter-apk/app-release.apk
+4. Send this .apk file to any Android phone to install the app!
+
 ------------------------------------------------------------------------
-Support: Created by [Your Name/Team Name]
+KEY APP FEATURES
+------------------------------------------------------------------------
+- AI DECOR AGENT: Chat with a professional designer.
+- COLOR RECO: Choose a Room and Mood to get unique 5-color palettes.
+- AR VISUALIZER: Use the camera to see colors on your own walls.
+- MY GALLERY: Save your favorite designs to show later.
+
+------------------------------------------------------------------------
+TROUBLESHOOTING
+------------------------------------------------------------------------
+- "Project not building": Run 'flutter clean' then 'flutter pub get'.
+- "Camera not working": Ensure you accepted the camera permission pop-up.
+- "Kaggle Error": Ensure the Kaggle notebook is still running and 
+  the URL hasn't changed.
+------------------------------------------------------------------------
 ========================================================================
