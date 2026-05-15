@@ -85,7 +85,6 @@ String _harmonyText(String mood, String family) {
   return 'Balanced — visually pleasant and versatile.';
 }
 
-// ─── Screen ───────────────────────────────────────────────────────────────────
 class RecommendationsScreen extends StatefulWidget {
   const RecommendationsScreen({super.key});
 
@@ -118,7 +117,31 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
 
   List<Color> get _palette {
     final moodMap = _kPalettes[_mood] ?? _kPalettes['Calm']!;
-    final raw = moodMap[_familyKey] ?? moodMap['blues']!;
+    final List<int> raw = List<int>.from(moodMap[_familyKey] ?? moodMap['blues']!);
+    
+    // DYNAMIC SHIFT: If it's a neutral family, vary it by room type
+    if (_familyKey == 'neutrals' || _familyKey == 'bw' || _familyKey == 'earth') {
+      return raw.map((v) {
+        Color base = Color(v);
+        int r = base.red;
+        int g = base.green;
+        int b = base.blue;
+
+        // Apply room-specific offsets to create variety
+        if (_roomType == 'Bedroom' || _roomType == 'Kids Room') {
+          r = (r + 15).clamp(0, 255); // Warmth
+          b = (b - 8).clamp(0, 255);
+        } else if (_roomType == 'Office' || _roomType == 'Kitchen') {
+          b = (b + 12).clamp(0, 255); // Focus / Cool
+          g = (g + 5).clamp(0, 255);
+        } else if (_roomType == 'Dining Room') {
+          r = (r + 10).clamp(0, 255);
+          g = (g - 5).clamp(0, 255);
+        }
+        return Color.fromARGB(255, r, g, b);
+      }).toList();
+    }
+    
     return raw.map((v) => Color(v)).toList();
   }
 
@@ -137,7 +160,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         'harmony': _harmony,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
-      // Also update preferences
       await FirebaseDatabase.instance.ref('users/${user.uid}').update({
         'preferences': {
           'roomType': _roomType,
@@ -224,19 +246,16 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Room Type ──────────────────────────────────────────────────
             _sectionLabel('ROOM TYPE'),
             const SizedBox(height: 10),
             _chipRow(_kRoomTypes, _roomType, (v) => setState(() => _roomType = v)),
             const SizedBox(height: 24),
 
-            // ── Mood ───────────────────────────────────────────────────────
             _sectionLabel('MOOD'),
             const SizedBox(height: 10),
             _chipRow(_kMoods, _mood, (v) => setState(() => _mood = v)),
             const SizedBox(height: 24),
 
-            // ── Color Family ───────────────────────────────────────────────
             _sectionLabel('COLOUR FAMILY'),
             const SizedBox(height: 10),
             SizedBox(
@@ -277,7 +296,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
             _buildAIAnalysis(palette[0]),
             const SizedBox(height: 24),
 
-            // ── Palette Result ─────────────────────────────────────────────
             _sectionLabel('YOUR 5-COLOUR PALETTE'),
             const SizedBox(height: 14),
             Container(
@@ -314,7 +332,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  // Hex codes
                   Row(
                     children: palette.map((c) {
                       final hex = '#${c.value.toRadixString(16).substring(2).toUpperCase()}';
@@ -330,7 +347,6 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
             ),
             const SizedBox(height: 28),
 
-            // ── Action Buttons ─────────────────────────────────────────────
             SizedBox(
               width: double.infinity,
               height: 54,
@@ -432,11 +448,9 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
                   ),
                 );
               }
-              
               final moodIdx = snapshot.data;
               final moodNames = ['MODERN', 'WARM', 'CALM'];
-              final predictedMood = moodIdx != null ? moodNames[moodIdx] : 'NOT DETECTED';
-              
+              final predictedMood = moodIdx != null ? moodNames[moodIdx] : 'CALM'; // Default to CALM if not sure
               return Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [

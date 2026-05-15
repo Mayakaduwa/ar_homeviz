@@ -22,7 +22,6 @@ Map<String, dynamic> _colorSegmentIsolate(Map<String, dynamic> args) {
   final img.Image? decoded = img.decodeImage(imageBytes);
   if (decoded == null) return {'segments': null, 'coverage': 0.0, 'wallPixels': 0};
 
-  // Scale down to maskSize×maskSize for fast processing
   final img.Image small = img.copyResize(
     decoded,
     width: maskSize,
@@ -33,10 +32,6 @@ Map<String, dynamic> _colorSegmentIsolate(Map<String, dynamic> args) {
   final int w = small.width;
   final int h = small.height;
 
-  // ── Step 1: Sample "likely wall" zones ────────────────────────────────────
-  // Walls appear in the top portion of interior photos, especially corners.
-  // Zones: top-left strip, top-center strip, top-right strip (upper 20%)
-  // ── Step 1: Sample "target" zones ─────────────────────────────────────────
   final List<_LabColor> samples = [];
 
   void sampleZone(int x0, int x1, int y0, int y1) {
@@ -48,27 +43,22 @@ Map<String, dynamic> _colorSegmentIsolate(Map<String, dynamic> args) {
     }
   }
 
-  // Floor sampling (bottom center) vs Wall sampling (top strips)
   if (isFloor) {
     sampleZone((w * 0.4).toInt(), (w * 0.6).toInt(), (h * 0.8).toInt(), h);
   } else {
     final int sampleH = (h * 0.20).toInt().clamp(4, h);
-    sampleZone(0, (w * 0.12).toInt().clamp(2, w), 0, sampleH);               // top-left
-    sampleZone((w * 0.35).toInt(), (w * 0.65).toInt(), 0, sampleH);          // top-center
-    sampleZone((w * 0.88).toInt().clamp(0, w - 2), w, 0, sampleH);          // top-right
+    sampleZone(0, (w * 0.12).toInt().clamp(2, w), 0, sampleH);               
+    sampleZone((w * 0.35).toInt(), (w * 0.65).toInt(), 0, sampleH);          
+    sampleZone((w * 0.88).toInt().clamp(0, w - 2), w, 0, sampleH);          
   }
 
   if (samples.isEmpty) return {'segments': null, 'coverage': 0.0, 'wallPixels': 0};
 
-  // Median LAB = representative "wall" colour
   final double refL = _median(samples.map((s) => s.l).toList());
   final double refA = _median(samples.map((s) => s.a).toList());
   final double refB = _median(samples.map((s) => s.b).toList());
   final _LabColor refWall = _LabColor(refL, refA, refB);
 
-  // ── Step 2: Classify pixels ───────────────────────────────────────────────
-  // Delta-E threshold: 30 is better balanced for indoor lighting vs the original 38
-  // (tighter = fewer false positives; wider = catches more wall pixels in dark rooms)
   const double kThreshold = 30.0;
 
   final List<bool> mask = List.filled(w * h, false);
@@ -80,7 +70,6 @@ Map<String, dynamic> _colorSegmentIsolate(Map<String, dynamic> args) {
     }
   }
 
-  // ── Step 3: Erosion — remove noise (keep pixel only if ≥4 neighbours match)
   final List<bool> clean = List.filled(w * h, false);
   for (int y = 1; y < h - 1; y++) {
     for (int x = 1; x < w - 1; x++) {
@@ -96,7 +85,6 @@ Map<String, dynamic> _colorSegmentIsolate(Map<String, dynamic> args) {
     }
   }
 
-  // ── Step 4: Merge into horizontal segments ────────────────────────────────
   final List<Map<String, double>> segments = [];
   int wallPixels = 0;
 
@@ -122,17 +110,12 @@ Map<String, dynamic> _colorSegmentIsolate(Map<String, dynamic> args) {
   return {'segments': segments, 'coverage': coverage, 'wallPixels': wallPixels};
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LAB colour helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _LabColor {
   final double l, a, b;
   const _LabColor(this.l, this.a, this.b);
 }
 
 _LabColor _rgbToLab(int r, int g, int b) {
-  // sRGB → linear
   double rl = r / 255.0;
   double gl = g / 255.0;
   double bl = b / 255.0;
@@ -140,7 +123,6 @@ _LabColor _rgbToLab(int r, int g, int b) {
   gl = gl > 0.04045 ? math.pow((gl + 0.055) / 1.055, 2.4).toDouble() : gl / 12.92;
   bl = bl > 0.04045 ? math.pow((bl + 0.055) / 1.055, 2.4).toDouble() : bl / 12.92;
 
-  // linear → XYZ D65
   double x = (rl * 0.4124 + gl * 0.3576 + bl * 0.1805) / 0.95047;
   double y = (rl * 0.2126 + gl * 0.7152 + bl * 0.0722) / 1.00000;
   double z = (rl * 0.0193 + gl * 0.1192 + bl * 0.9505) / 1.08883;
@@ -168,12 +150,7 @@ double _median(List<double> v) {
   return v.length.isOdd ? v[m] : (v[m - 1] + v[m]) / 2.0;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MLService public API (unchanged interface so ar_view_screen.dart works as-is)
-// ─────────────────────────────────────────────────────────────────────────────
-
 class MLService {
-  // Singleton pattern
   static final MLService _instance = MLService._internal();
   factory MLService() => _instance;
   MLService._internal();
@@ -181,28 +158,25 @@ class MLService {
   bool _isReady = false;
   Interpreter? _segmentationInterpreter;
   Interpreter? _recommendationInterpreter;
-  int _currentModelVersion = 2; // Default to v2 as requested
+  int _currentModelVersion = 2; 
 
-  /// Switch between model versions (1 or 2)
   void setModelVersion(int version) {
     if (version == _currentModelVersion) return;
     _currentModelVersion = version;
     _isReady = false;
-    loadModel(); // Reload with new version
+    loadModel(); 
   }
 
   int get currentModelVersion => _currentModelVersion;
 
-  /// Public maskSize that the painter uses for coordinate scaling.
   static const int _kMaskSize = 128;
   
-  /// YOUR NGROK URL FROM COLAB
   static const String _kRemoteApiUrl = "https://evacuate-contents-species.ngrok-free.dev";
+  static const String _kChatApiUrl = "https://transfer-certainty-wick.ngrok-free.dev/chat";
 
   bool get isModelLoaded => _isReady;
   int get maskSize => _kMaskSize;
 
-  /// Loads the TFLite models into memory for local inference
   Future<void> _loadModel() async {
     try {
       String modelFile = _currentModelVersion == 1 
@@ -228,55 +202,35 @@ class MLService {
   }) async {
     if (!_isReady) return null;
 
-    // --- STEP A: TRY REMOTE AI (CLOUD) ---
     try {
-      print('🌐 Attempting Cloud AI (${target.name}) Segmentation...');
-
-      // FIX: Ngrok uses a wildcard SSL cert that Android's strict validator rejects.
-      // We create a custom HttpClient that bypasses certificate verification,
-      // identical to the fix in chat_service.dart.
       final httpClient = HttpClient()
-        ..badCertificateCallback =
-            (X509Certificate cert, String host, int port) => true;
+        ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
       final ioClient = IOClient(httpClient);
 
       final uri = Uri.parse('$_kRemoteApiUrl/segment');
       final request = http.MultipartRequest('POST', uri)
-        ..headers['ngrok-skip-browser-warning'] = 'true'  // bypass Ngrok interstitial page
+        ..headers['ngrok-skip-browser-warning'] = 'true'  
         ..fields['target'] = target.name
-        ..files.add(
-            http.MultipartFile.fromBytes('file', imageBytes, filename: 'input.jpg'));
+        ..files.add(http.MultipartFile.fromBytes('file', imageBytes, filename: 'input.jpg'));
 
-      // Merge the request into an IOClient-aware send
-      final streamedResponse = await ioClient
-          .send(request)
-          .timeout(const Duration(seconds: 30)); // 30s — model inference takes time
+      final streamedResponse = await ioClient.send(request).timeout(const Duration(seconds: 30)); 
       final response = await http.Response.fromStream(streamedResponse);
       ioClient.close();
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List<dynamic> rawMask = data['mask'];
-        print('✅ Cloud AI segmentation succeeded (${target.name})');
         return _processRemoteMask(rawMask, target);
-      } else {
-        print('⚠️ Cloud AI returned HTTP ${response.statusCode}');
       }
     } catch (e) {
-      print('⚠️ Cloud AI unavailable (trying local TFLite): $e');
+      print('Cloud fallback to local: $e');
     }
 
-    // --- STEP B: LOCAL TFLITE AI (NEW - 6MB MODEL) ---
     if (_segmentationInterpreter != null) {
       try {
-        print('🤖 Running Local TFLite AI Segmentation (512x512)...');
-        
-        // 1. Preprocess: Decode and Resize to 512x512
         final img.Image? decoded = img.decodeImage(imageBytes);
         if (decoded != null) {
           final img.Image resized = img.copyResize(decoded, width: 512, height: 512);
-          
-          // 2. Normalize and flatten to [1, 512, 512, 3]
           var input = List.filled(1 * 512 * 512 * 3, 0.0).reshape([1, 512, 512, 3]);
           for (int y = 0; y < 512; y++) {
             for (int x = 0; x < 512; x++) {
@@ -286,53 +240,35 @@ class MLService {
               input[0][y][x][2] = pixel.b / 255.0;
             }
           }
-
-          // 3. Prepare output: [1, 512, 512, 3]
           var output = List.filled(1 * 512 * 512 * 3, 0.0).reshape([1, 512, 512, 3]);
-          
-          // 4. Run Inference
           _segmentationInterpreter!.run(input, output);
-          
-          // 5. Process Output into 128x128 mask for display
           return _processTFLiteOutput(output, target);
         }
       } catch (e) {
-        print('⚠️ Local TFLite Inference failed: $e');
+        print('Local TFLite failed: $e');
       }
     }
 
-    // --- STEP C: LOCAL FALLBACK (HEURISTIC) ---
     try {
       final result = await compute(_colorSegmentIsolate, {
         'imageBytes': imageBytes,
         'maskSize': _kMaskSize,
         'isFloor': target == SegmentationTarget.floor,
       });
-
       final segments = result['segments'] as List<Map<String, double>>?;
       final double coverage = result['coverage'] as double? ?? 0.0;
-      
-      // BUG-005: Don't return null on high coverage (white/light walls score > 0.90)
-      // Instead accept it and let FallbackOverlayPainter handle the coloring
-      if (segments == null || coverage < 0.04) return null;
-      // If coverage is impossibly high (> 0.95) return null — probably a blank/solid image
-      if (coverage > 0.95) return null;
+      if (segments == null || coverage < 0.04 || coverage > 0.95) return null;
       return segments;
     } catch (e) {
-      print('❌ Local detection error: $e');
       return null;
     }
   }
 
-  /// Processes TFLite output [1, 512, 512, 3] into segments
   List<Map<String, double>> _processTFLiteOutput(List<dynamic> output, SegmentationTarget target) {
     final List<Map<String, double>> segments = [];
-    
-    // We downsample the 512 resolution to 128 for UI performance
     const int modelRes = 512;
-    const int displayRes = _kMaskSize; // 128
+    const int displayRes = _kMaskSize; 
     final double step = modelRes / displayRes;
-
     int targetClass = (target == SegmentationTarget.wall) ? 1 : 2;
 
     for (int y = 0; y < displayRes; y++) {
@@ -340,8 +276,6 @@ class MLService {
       for (int x = 0; x < displayRes; x++) {
         final int py = (y * step).toInt().clamp(0, modelRes - 1);
         final int px = (x * step).toInt().clamp(0, modelRes - 1);
-        
-        // Argmax: Find which class has highest probability
         double maxProb = -1.0;
         int maxClass = 0;
         for (int c = 0; c < 3; c++) {
@@ -351,9 +285,7 @@ class MLService {
             maxClass = c;
           }
         }
-        
         bool isTarget = (maxClass == targetClass);
-
         if (isTarget && startX == null) {
           startX = x;
         } else if (!isTarget && startX != null) {
@@ -368,12 +300,10 @@ class MLService {
     return segments;
   }
 
-  /// Converts a 2D grid mask from the server into optimized horizontal segments
   List<Map<String, double>> _processRemoteMask(List<dynamic> rawMask, SegmentationTarget target) {
     final List<Map<String, double>> segments = [];
     final int h = rawMask.length;
     final int w = rawMask[0].length;
-    
     final double stepY = h / _kMaskSize;
     final double stepX = w / _kMaskSize;
 
@@ -382,18 +312,8 @@ class MLService {
       for (int x = 0; x < _kMaskSize; x++) {
         final int py = (y * stepY).toInt().clamp(0, h - 1);
         final int px = (x * stepX).toInt().clamp(0, w - 1);
-        
         final int label = rawMask[py][px];
-        
-        // CLASS MAPPING:
-        // DeepLabV3 usually: Class 0=Background/Wall, Class 3=Floor (PASCAL VOC)
-        bool isTarget = false;
-        if (target == SegmentationTarget.wall) {
-          isTarget = (label == 0); // Background/Wall
-        } else {
-          isTarget = (label == 3); // Floor
-        }
-
+        bool isTarget = (target == SegmentationTarget.wall) ? (label == 0) : (label == 3);
         if (isTarget && startX == null) {
           startX = x;
         } else if (!isTarget && startX != null) {
@@ -408,31 +328,45 @@ class MLService {
     return segments;
   }
 
-  // ─── Neural Color Recommendation (TFLite) ──────────────────────────────────
-  
-  /// Uses the trained neural network (color_reco_model.tflite) to predict mood from color
   Future<int?> predictMood(Color color) async {
-    if (_recommendationInterpreter == null) return null;
-    
-    try {
-      // Input: [R, G, B] normalized to 0.0 - 1.0
-      var input = [
-        [color.red / 255.0, color.green / 255.0, color.blue / 255.0]
-      ];
-      
-      // Output: Probabilities for 3 moods [0:Modern, 1:Warm, 2:Calm]
-      var output = List.filled(1 * 3, 0.0).reshape([1, 3]);
-      
-      _recommendationInterpreter!.run(input, output);
-      
-      List<double> probabilities = List<double>.from(output[0]);
-      int predictedIndex = probabilities.indexOf(probabilities.reduce(math.max));
-      
-      return predictedIndex;
-    } catch (e) {
-      debugPrint('Neural Inference Error: $e');
-      return null;
+    if (_isReady && _recommendationInterpreter != null) {
+      try {
+        var input = [[color.red / 255.0, color.green / 255.0, color.blue / 255.0]];
+        var output = List.filled(1 * 3, 0.0).reshape([1, 3]);
+        _recommendationInterpreter!.run(input, output);
+        List<double> scores = List<double>.from(output[0]);
+        int bestIdx = 0;
+        for (int i = 1; i < scores.length; i++) {
+          if (scores[i] > scores[bestIdx]) bestIdx = i;
+        }
+        if (scores[bestIdx] > 0.45) return bestIdx;
+      } catch (e) {
+        debugPrint("Local Mood Error: $e");
+      }
     }
+
+    try {
+      final hex = '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
+      final response = await http.post(
+        Uri.parse(_kChatApiUrl),
+        headers: {'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true'},
+        body: jsonEncode({
+          'message': "Classify this color hex $hex into one mood: MODERN, WARM, or CALM. Respond with only ONE WORD.",
+          'system_prompt': "You are a color expert. Return ONLY the word: MODERN, WARM, or CALM.",
+        }),
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        String moodStr = (data['response'] ?? data['generated_text'] ?? "").toString().toUpperCase();
+        if (moodStr.contains('MODERN')) return 0;
+        if (moodStr.contains('WARM')) return 1;
+        if (moodStr.contains('CALM')) return 2;
+      }
+    } catch (e) {
+      debugPrint("Kaggle Fallback Error: $e");
+    }
+    return null;
   }
 
   void dispose() {

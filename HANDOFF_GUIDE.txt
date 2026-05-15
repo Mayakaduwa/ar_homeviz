@@ -1,0 +1,77 @@
+========================================================================
+             AR-HOMEVIZ: ML-INTEGRATED INTERIOR DESIGNER
+                       CLIENT HANDOFF & RUNNING GUIDE
+========================================================================
+
+Project Overview:
+AR-HomeViz is a professional interior design application that uses 
+Augmented Reality (AR) and Artificial Intelligence (AI) to help users 
+visualize wall colors in real-time.
+
+------------------------------------------------------------------------
+STEP 1: PREREQUISITES (FOR LAPTOP)
+------------------------------------------------------------------------
+1. Flutter SDK: Installed and added to PATH.
+2. Android Studio: Installed with 'Android SDK' and 'Command-line Tools'.
+3. VS Code: (Optional) with Flutter & Dart extensions.
+4. Kaggle Account: Required to run the high-power AI "Brain".
+
+------------------------------------------------------------------------
+STEP 2: STARTING THE AI "BRAIN" (KAGGLE)
+------------------------------------------------------------------------
+The app uses a Hybrid AI architecture. To enable the Smart Chat and 
+Advanced Mood Analysis:
+
+1. Log into Kaggle.com and open the 'AR-HomeViz-Brain' notebook.
+2. Ensure GPU is enabled (Settings > Accelerator > GPU T4 x2).
+3. Copy the 'Phi-3 ML Server' script into a cell.
+4. Run the cell. Wait for the "🚀 STABLE URL" (Ngrok URL) to appear.
+5. In the Flutter project, update the URLs in:
+   - lib/services/chat_service.dart (kKaggleApiUrl)
+   - lib/services/ml_service.dart (kRemoteApiUrl)
+
+------------------------------------------------------------------------
+STEP 3: RUNNING ON AN ANDROID PHONE (RECOMMENDED)
+------------------------------------------------------------------------
+For the best experience (AR and Camera features):
+
+1. Connect the Android phone via USB.
+2. Enable 'Developer Options' and 'USB Debugging' on the phone.
+3. In the project terminal, run:
+   $ flutter pub get
+   $ flutter run --release
+
+Note: If the device does not support ARCore (like Samsung A06), the app 
+will automatically switch to "Standard Vision Mode" for wall coloring.
+
+------------------------------------------------------------------------
+STEP 4: RUNNING ON LAPTOP (EMULATOR)
+------------------------------------------------------------------------
+1. Open Android Studio > Device Manager.
+2. Start a "Pixel" or "Nexus" Virtual Device.
+3. Once the emulator is running, in the terminal run:
+   $ flutter run
+4. Note: Camera/AR features will use the laptop's webcam or a simulated 
+   room.
+
+------------------------------------------------------------------------
+KEY FEATURES TO TEST
+------------------------------------------------------------------------
+1. AI DECOR AGENT: Ask for room advice. It remembers previous messages!
+2. COLOR RECOMMENDATIONS: Choose 'Neutrals'. Notice how colors shift 
+   when you change the 'Room Type' (Office vs Bedroom).
+3. NEURAL ANALYSIS: Watch the "Neural Network Analysis" card classify 
+   your colors as Modern, Warm, or Calm.
+4. AR VIEW: Capture a photo of a wall and tap to change its color 
+   instantly using on-device ML segmentation.
+
+------------------------------------------------------------------------
+TECHNICAL NOTES
+------------------------------------------------------------------------
+- Minimum Android API: 24 (Android 7.0)
+- Target Android API: 34 (Android 14)
+- ML Engine: TFLite (Local) + Phi-3 (Remote Fallback)
+- Authentication/Storage: Google Firebase
+------------------------------------------------------------------------
+Support: Created by [Your Name/Team Name]
+========================================================================
