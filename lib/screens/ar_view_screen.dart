@@ -109,6 +109,9 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
       arAvailable = false;
     }
 
+    // 🛑 AR DISCONNECT SWITCH: Force false to bypass AR mode on ALL devices (Fixes Nokia 5.4 crashes)
+    arAvailable = false;
+
     if (arAvailable && mounted) {
       setState(() {
         _isArSupported = true;
@@ -180,6 +183,15 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
           _segmentationMask = mask;
           _isProcessingML = false;
         });
+        if (mask == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Your device hardware does not support the V2 AI Engine.'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
       }
     } catch (e) {
       debugPrint("ML Processing error: $e");
@@ -195,16 +207,24 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
     try {
       // BUG-001: CASE 1 — AR mode: safely release camera before handing over
       if (_isArSupported) {
-        // Dispose AR controller first to release Camera ID 0
-        _arCoreController?.dispose();
-        _arCoreController = null;
-        if (mounted) setState(() => _isArSupported = false);
-        
-        // Give Android Camera2 API time to fully release hardware lock
-        await Future.delayed(const Duration(milliseconds: 900));
-        
-        // Now it is safe to initialize standard camera
-        await _startStandardCamera();
+        // Safe Handoff: Do NOT dispose ARController and jump to standard CameraController.
+        // Instead, use the native system camera app which cleanly suspends AR hardware lock.
+        final XFile? photo = await _picker.pickImage(source: ImageSource.camera, imageQuality: 100);
+        if (photo != null && mounted) {
+          final file = File(photo.path);
+          setState(() {
+            _imageFile = file;
+            _isLoading = false;
+            _isCapturing = false;
+            _isArSupported = false; // Turn off AR mode explicitly to show the design view
+          });
+          _arCoreController?.dispose();
+          _arCoreController = null;
+          _processImageWithML(file);
+        } else {
+          if (mounted) setState(() { _isLoading = false; _isCapturing = false; });
+        }
+        return; // Exit here, we're done with AR capture path
       }
 
       // CASE 2: Standard Camera should now be ready
@@ -408,24 +428,19 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
             alignment: Alignment.center,
             children: [
               Image.file(_imageFile!, fit: BoxFit.contain),
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: _segmentationMask != null
-                      ? CustomPaint(
-                          painter: SegmentationPainter(
-                            mask: _segmentationMask!,
-                            color: overlayColor,
-                            maskSize: _mlService.maskSize,
-                            smoothness: _smoothness,
-                          ),
-                        )
-                      : CustomPaint(
-                          painter: FallbackOverlayPainter(
-                            color: overlayColor,
-                          ),
-                        ),
+              if (_segmentationMask != null)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: SegmentationPainter(
+                        mask: _segmentationMask!,
+                        color: overlayColor,
+                        maskSize: _mlService.maskSize,
+                        smoothness: _smoothness,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -861,14 +876,3 @@ class SegmentationPainter extends CustomPainter {
       oldDelegate.smoothness != smoothness;
 }
 
-class FallbackOverlayPainter extends CustomPainter {
-  final Color color;
-  FallbackOverlayPainter({required this.color});
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color..blendMode = BlendMode.softLight..style = PaintingStyle.fill;
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
-  }
-  @override
-  bool shouldRepaint(covariant FallbackOverlayPainter oldDelegate) => oldDelegate.color != color;
-}

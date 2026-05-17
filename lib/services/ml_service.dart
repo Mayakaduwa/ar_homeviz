@@ -201,31 +201,6 @@ class MLService {
     SegmentationTarget target = SegmentationTarget.wall,
   }) async {
     if (!_isReady) return null;
-
-    try {
-      final httpClient = HttpClient()
-        ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
-      final ioClient = IOClient(httpClient);
-
-      final uri = Uri.parse('$_kRemoteApiUrl/segment');
-      final request = http.MultipartRequest('POST', uri)
-        ..headers['ngrok-skip-browser-warning'] = 'true'  
-        ..fields['target'] = target.name
-        ..files.add(http.MultipartFile.fromBytes('file', imageBytes, filename: 'input.jpg'));
-
-      final streamedResponse = await ioClient.send(request).timeout(const Duration(seconds: 30)); 
-      final response = await http.Response.fromStream(streamedResponse);
-      ioClient.close();
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final List<dynamic> rawMask = data['mask'];
-        return _processRemoteMask(rawMask, target);
-      }
-    } catch (e) {
-      print('Cloud fallback to local: $e');
-    }
-
     if (_segmentationInterpreter != null) {
       try {
         final img.Image? decoded = img.decodeImage(imageBytes);
