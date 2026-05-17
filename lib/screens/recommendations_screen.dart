@@ -200,7 +200,7 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
               const SizedBox(height: 20),
               _sheetTile(Icons.camera_alt_rounded, 'Capture Room Photo', () {
                 Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => ARVisualizationScreen(initialColor: _palette[2])));
+                Navigator.push(context, MaterialPageRoute(builder: (_) => ARVisualizationScreen(initialPalette: _palette)));
               }),
               const SizedBox(height: 12),
               _sheetTile(Icons.photo_library_rounded, 'Choose from Gallery', () async {
@@ -208,7 +208,7 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
                 if (picked != null && context.mounted) {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (_) => ARVisualizationScreen(
-                    initialImage: File(picked.path), initialColor: _palette[2],
+                    initialImage: File(picked.path), initialPalette: _palette,
                   )));
                 }
               }),

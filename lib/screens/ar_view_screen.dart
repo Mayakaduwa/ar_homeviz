@@ -21,8 +21,9 @@ import '../main.dart' show cameras;
 class ARVisualizationScreen extends StatefulWidget {
   final File? initialImage;
   final Color? initialColor;
+  final List<Color>? initialPalette;
   
-  const ARVisualizationScreen({super.key, this.initialImage, this.initialColor});
+  const ARVisualizationScreen({super.key, this.initialImage, this.initialColor, this.initialPalette});
 
   @override
   State<ARVisualizationScreen> createState() => _ARVisualizationScreenState();
@@ -64,11 +65,24 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
     if (widget.initialImage != null) {
       _imageFile = widget.initialImage;
     }
-    if (widget.initialColor != null) {
+    if (widget.initialPalette != null && widget.initialPalette!.isNotEmpty) {
+      _baseColor = widget.initialPalette!.length > 2 ? widget.initialPalette![2] : widget.initialPalette![0];
+      for (var color in widget.initialPalette!.reversed) {
+        if (!_customColors.any((c) => c.value == color.value)) {
+          _customColors.insert(0, color);
+        }
+      }
+    } else if (widget.initialColor != null) {
       _baseColor = widget.initialColor!;
+      // Ensure the initial color is visible in our picker list
+      if (!_customColors.any((c) => c.value == _baseColor.value)) {
+        _customColors.insert(0, _baseColor);
+      }
     }
     _initializeHybridEngine();
   }
+
+  final List<Color> _customColors = List.from(Colors.primaries);
 
   Future<void> _initializeHybridEngine() async {
     if (mounted) setState(() => _isLoading = true);
@@ -306,8 +320,44 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
           _buildTopBar(isDesignMode),
           _buildBottomControls(isDesignMode, overlayColor),
 
+          // --- LAYER 3.5: Live Color Indicator ---
+          if (!isDesignMode && !_isChatOpen) _buildLiveColorIndicator(),
+
           // --- LAYER 4: Chat ---
           if (_isChatOpen) _buildChatPanel(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLiveColorIndicator() {
+    return Positioned(
+      bottom: 240, // Above the controls
+      right: 20,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: Colors.black45,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: _baseColor,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(color: _baseColor.withOpacity(0.5), blurRadius: 10, spreadRadius: 2)
+                ],
+              ),
+              child: const Icon(Icons.colorize_rounded, color: Colors.white, size: 20),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text('READY', style: GoogleFonts.outfit(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
         ],
       ),
     );
@@ -521,9 +571,9 @@ class _ARVisualizationScreenState extends State<ARVisualizationScreen> {
       height: 48,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        itemCount: Colors.primaries.length,
+        itemCount: _customColors.length,
         itemBuilder: (_, i) {
-          final color = Colors.primaries[i];
+          final color = _customColors[i];
           final bool selected = _baseColor.value == color.value;
           return GestureDetector(
             onTap: () => setState(() => _baseColor = color),
